@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Orchard Headphones</title>
+    <meta property="og:type" content="product" />
+    <meta property="og:title" content="Orchard Headphones" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Product",
+            "@id": "#headphones",
+            "name": "Orchard Headphones",
+            "sku": "OR-01",
+            "brand": { "name": "Orchard" },
+            "image": "/headphones.png",
+            "offers": { "@id": "#offer" }
+          },
+          {
+            "@type": "Offer",
+            "@id": "#offer",
+            "price": "129.95",
+            "priceCurrency": "CAD",
+            "availability": "https://schema.org/InStock"
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <nav>Navigation noise</nav>
+    <div class="cookie-banner">Accept all cookies</div>
+    <main>
+      <h1>Orchard Headphones</h1>
+      <p>Price: CAD 129.95</p>
+      <p>Wireless, comfortable and repairable.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Battery</td>
+            <td>40 hours</td>
+          </tr>
+        </tbody>
+      </table>
+      <div>
+        Save with <span data-coupon-code="MORY10">MORY10</span> at checkout. Conditions apply.
+      </div>
+      <a href="/buy">Buy now</a>
+    </main>
+    <footer>Footer noise</footer>
+    <script>
+      alert('noise');
+    </script>
+    <div hidden>Hidden noise</div>
+    <div data-recommendations>Recommended unrelated products</div>
+  </body>
+</html>

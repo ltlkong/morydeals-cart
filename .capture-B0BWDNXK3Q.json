@@ -1,0 +1,272 @@
+{
+  "taskId": "2750525f-8f9f-40b8-8ec4-824286c8ccd5",
+  "attemptId": "2073f380-c7ee-4308-a0f0-7ecbbf037149",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.amazon.ca/9030cf35123a8d2c/2750525f-8f9f-40b8-8ec4-824286c8ccd5--2073f380-c7ee-4308-a0f0-7ecbbf037149",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "amazon-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.amazon.ca/dp/B0BWDNXK3Q",
+        "title": "Pmnianhua 55'' Wall-Mounted Floating TV Stand Unit With Storage For Under TV Bedroom (Walnut)",
+        "sku": "B0BWDNXK3Q",
+        "variant": {
+          "id": "B0BWDNXK3Q",
+          "label": "140cm · Walnut",
+          "options": [
+            {
+              "name": "Size",
+              "value": "140cm"
+            },
+            {
+              "name": "Color",
+              "value": "Walnut"
+            }
+          ],
+          "evidence": "#twister selected dimensions"
+        },
+        "rating": {
+          "value": 4.4,
+          "scale": 5,
+          "count": 219,
+          "evidence": "#averageCustomerReviews"
+        },
+        "brand": "Pmnianhua",
+        "badges": [
+          "Amazon's Choice"
+        ],
+        "categories": [
+          "Home & Kitchen",
+          "Furniture",
+          "Home Entertainment Furniture",
+          "Television Stands & Entertainment Centres"
+        ],
+        "specifications": [
+          {
+            "name": "Colour",
+            "value": "Walnut"
+          },
+          {
+            "name": "Brand",
+            "value": "Pmnianhua"
+          },
+          {
+            "name": "Size",
+            "value": "140cm"
+          },
+          {
+            "name": "Style",
+            "value": "modern"
+          },
+          {
+            "name": "Shape",
+            "value": "Rectangular"
+          },
+          {
+            "name": "Unit Count",
+            "value": "1 Count"
+          },
+          {
+            "name": "SpecialFeatures",
+            "value": "durable, scratch-resistant, space saving, water-resistant"
+          },
+          {
+            "name": "ProductIDType",
+            "value": "726434455895"
+          },
+          {
+            "name": "Number of Items",
+            "value": "1"
+          },
+          {
+            "name": "IncludedComponents",
+            "value": "hardware kit"
+          },
+          {
+            "name": "Manufacturer Contact Information",
+            "value": "chengdu sichuan,CN 610000"
+          },
+          {
+            "name": "ASIN",
+            "value": "B0BWDNXK3Q"
+          },
+          {
+            "name": "Item Depth",
+            "value": "9.29 inches"
+          },
+          {
+            "name": "Item Dimensions",
+            "value": "139.7 x 23.6 x 16 centimetres"
+          },
+          {
+            "name": "Material",
+            "value": "Engineered Wood"
+          },
+          {
+            "name": "Assembly Instructions Description",
+            "value": "Included"
+          }
+        ],
+        "images": [
+          "https://m.media-amazon.com/images/I/71K9+28GnTL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/61gXEpmh51L._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/6198e3+EzJL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/612VJR6PhgL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/61zL18heu8L._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71t+Cbb7wML._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/811NH-oVUsL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/81JZmoJEkUL._AC_SL1500_.jpg"
+        ],
+        "description": "About this item 【Space Saving& Large Capacity】With one door and 2 open cabints design, our modern floating tv shelf has large storage. The floating design of the wall-mounted tv cabinet does not occupy too much space and can free up the floor space. It can be used to display and store multiple shelves, routers, set-top boxes, ideal for DVD players, CDs, remote controls, projectors, small decorations, game consoles, TV components and decorations. 【Easy to Assemble & Put Together】Our tv floating shelf can be easily installed using the included hardware, tools and instructions. Compatible with solid wood, wood or gypsum walls (not applicable to dry walls, cavity walls, gypsum board walls). If you have any installation problems or other questions, please feel free to contact us, we will help you any time asap. 【Waterproof & Durable】Made from solid plywood panel, our floating media console is waterproof, scratch-resistant and easy to clean. The floating entertainment shelf equipped with qaulity standard wall-mounted installation accessories and wooden nails, which made it durable! With smooth finish made it is very easy to keep the furniture unit as shiny as new. 【Packages & Service】Packages: 1* tv floating shelf,1*screw bag,1*direction.Comes with 7 layers of cardboard boxes and crumbly Styrofoam panels ensure the floating tv console stays safe on its long journey.PLease feel free to contact us if there is any damages or lost accessories, we will help you 7/24 hours. 【Modern & Rounded Coner Design】The floating TV shelf is simple modern in design and can easily complement any room or furniture style. Add some vitality and vigor to your bedroom, living room, media room and office.Designed with round corner, the wall mounted floating tv stand will provide you a safe and healthy living environment. › See more product details",
+        "evidence": "#ASIN + #productTitle",
+        "offers": [
+          {
+            "amountMinor": 21900,
+            "currency": "CAD",
+            "currencyEvidence": "#currencyOfPreference / purchase option",
+            "url": "https://www.amazon.ca/dp/B0BWDNXK3Q",
+            "seller": "Pmnianhua furniture",
+            "shipsFrom": "Amazon",
+            "condition": "new",
+            "evidence": "#desktop_buybox/newAccordionRow + #apex_desktop_newAccordionRow",
+            "availability": "InStock"
+          },
+          {
+            "amountMinor": 19710,
+            "compareAtAmountMinor": 21900,
+            "compareAtEvidence": "#desktop_buybox/primeSavingsUpsellAccordionRow + #apex_desktop_primeSavingsUpsellAccordionRow/reference-price",
+            "currency": "CAD",
+            "currencyEvidence": "#currencyOfPreference / purchase option",
+            "url": "https://www.amazon.ca/dp/B0BWDNXK3Q",
+            "seller": "Pmnianhua furniture",
+            "compareAtLabel": "List Price",
+            "savingsPercent": 10,
+            "shipsFrom": "Amazon",
+            "purchaseType": "member",
+            "condition": "new",
+            "evidence": "#desktop_buybox/primeSavingsUpsellAccordionRow + #apex_desktop_primeSavingsUpsellAccordionRow",
+            "availability": "InStock",
+            "promotions": [
+              {
+                "type": "member",
+                "text": "Prime Member Price",
+                "effectiveMinor": 19710,
+                "evidence": "#primeSavingsUpsellCaption_feature_div",
+                "percentOff": 10
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:38:03.192Z",
+        "completedAt": "2026-10-11T01:38:05.203Z",
+        "durationMs": 2011.64,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "amazon-ca",
+    "evidence": [
+      "url:www.amazon.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "selector": "#productTitle"
+        }
+      },
+      "parsing": {
+        "strategy": "amazon-ca"
+      },
+      "fallback": [
+        {
+          "on": [
+            "blocked",
+            "incomplete",
+            "http_error",
+            "unsupported_content"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "selector": "#productTitle"
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 2242.703,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 61.599,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.893,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 2014.439,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 6.786,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 53.63,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 69.657,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 32.162,
+        "status": "completed"
+      }
+    }
+  }
+}

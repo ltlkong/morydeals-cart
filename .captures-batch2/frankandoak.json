@@ -1,0 +1,127 @@
+{
+  "taskId": "c184dc98-f5f7-47c0-86fb-db191735e194",
+  "attemptId": "c13fbf2f-d2d2-4a20-922b-e94607381973",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.frankandoak.com/11f19dff10d24bd6/c184dc98-f5f7-47c0-86fb-db191735e194--c13fbf2f-d2d2-4a20-922b-e94607381973",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "parsed",
+    "issues": [],
+    "products": [
+      {
+        "url": "https://www.frankandoak.com/products/mens-woven-sweater-black-2mkw0003fe-bla",
+        "title": "ESSENTIAL CREWNECK SWEATER",
+        "images": [
+          "https://www.frankandoak.com/cdn/shop/files/2MKW0003FE-BLACK-1037.jpg?v=1788280937&width=5000",
+          "https://www.frankandoak.com/cdn/shop/files/2MKW0003FE-BLACK-1041.jpg?v=1788280937&width=5000",
+          "https://www.frankandoak.com/cdn/shop/files/2MKW0003FE-BLACK-1057.jpg?v=1788280937&width=5000",
+          "https://www.frankandoak.com/cdn/shop/files/2MKW0003FE-BLACK-1063.jpg?v=1788280937&width=5000",
+          "https://www.frankandoak.com/cdn/shop/files/2MKW0003FE-BLACK.jpg?v=1788146501&width=5000",
+          "https://www.frankandoak.com/cdn/shop/files/2MKW0003FE_BLACK-M.jpg?v=1788280937&width=5000",
+          "https://www.frankandoak.com/cdn/shop/files/2MKW0003FE-BLACK-1020.jpg?v=1788280937&width=5000"
+        ],
+        "offers": [
+          {
+            "amountMinor": 10500,
+            "currency": "CAD",
+            "currencyEvidence": "Regular price $105.00 CAD",
+            "url": "https://www.frankandoak.com/products/mens-woven-sweater-black-2mkw0003fe-bla",
+            "evidence": "Regular price $105.00 CAD"
+          }
+        ],
+        "evidence": "page.md"
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T02:51:02.132Z",
+        "completedAt": "2026-10-11T02:51:02.225Z",
+        "durationMs": 93.288,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "shopify",
+    "evidence": [
+      "Shopify.shop",
+      "Shopify.locale",
+      "Shopify.currency",
+      "Shopify.country"
+    ],
+    "issues": [
+      "Shopify page does not identify one selected variant"
+    ],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 59217,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000
+      },
+      "parsing": {
+        "strategy": "shopify"
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 6677.057,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 56.531,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 821.99,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 94.039,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 71.88,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 5563.555,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 42.006,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 20.81,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 7948,
+      "outputTokens": 1143,
+      "requestMs": 5560.183
+    }
+  }
+}

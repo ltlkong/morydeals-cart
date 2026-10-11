@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "acquisition": { "mode": "http" },
+  "parsing": {
+    "strategy": "llm",
+    "provider": "siliconflow",
+    "model": "zai-org/GLM-5.3-Flash",
+    "timeoutMs": 120000
+  }
+}

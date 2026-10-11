@@ -1,0 +1,127 @@
+diff -ruN a/apps/mobile/src/account/MoryScreen.tsx b/apps/mobile/src/account/MoryScreen.tsx
+--- a/apps/mobile/src/account/MoryScreen.tsx	2026-10-10 01:27:05.000000000 -0700
++++ b/apps/mobile/src/account/MoryScreen.tsx	2026-10-10 02:01:38.677812736 -0700
+@@ -19,6 +19,7 @@
+   wink: "Wink",
+   sleepy: "Sleepy",
+   starry: "Starry",
++  surprised: "Wow",
+ };
+ 
+ /** Choose what Mory wears on its head and its expression; every Mory in the app follows. */
+diff -ruN a/apps/mobile/src/account/mory-look-parts.ts b/apps/mobile/src/account/mory-look-parts.ts
+--- a/apps/mobile/src/account/mory-look-parts.ts	2026-10-10 01:27:05.000000000 -0700
++++ b/apps/mobile/src/account/mory-look-parts.ts	2026-10-10 02:01:38.677812736 -0700
+@@ -15,6 +15,7 @@
+   "wink",
+   "sleepy",
+   "starry",
++  "surprised",
+ ] as const;
+ 
+ /** A saved look from storage (untrusted): only known parts. */
+diff -ruN a/apps/mobile/test/mory-look.test.ts b/apps/mobile/test/mory-look.test.ts
+--- a/apps/mobile/test/mory-look.test.ts	2026-10-10 01:27:05.000000000 -0700
++++ b/apps/mobile/test/mory-look.test.ts	2026-10-10 02:01:38.677812736 -0700
+@@ -16,6 +16,10 @@
+     validMoryLook({ headpiece: "lemon", expression: "happy" }),
+     true,
+   );
++  assert.equal(
++    validMoryLook({ headpiece: "orange", expression: "surprised" }),
++    true,
++  );
+   for (const value of [
+     null,
+     {},
+diff -ruN a/apps/ui-showcase/src/MoryPlayground.tsx b/apps/ui-showcase/src/MoryPlayground.tsx
+--- a/apps/ui-showcase/src/MoryPlayground.tsx	2026-10-10 01:27:12.000000000 -0700
++++ b/apps/ui-showcase/src/MoryPlayground.tsx	2026-10-10 02:01:38.677812736 -0700
+@@ -5,7 +5,7 @@
+ import { Heading, Panel, Options, CodeBlock } from './blocks';
+ 
+ const fruits: MoryHeadpiece[] = ['orange', 'apple', 'pear', 'cherry', 'lemon', 'none'];
+-const expressions: MoryExpression[] = ['neutral', 'happy', 'wink', 'sleepy', 'starry', 'worried'];
++const expressions: MoryExpression[] = ['neutral', 'happy', 'wink', 'sleepy', 'starry', 'surprised', 'worried'];
+ const props: MoryHolding[] = ['none', 'card', 'camera', 'heart', 'tag', 'deals', 'sign', 'keyboard', 'box', 'plug', 'bell', 'drop', 'bag', 'magnifier'];
+ const stateKinds: MoryStateKind[] = ['empty-cart', 'price-drop', 'loading', 'no-results', 'error', 'alert-set'];
+ const stateCopy: Record<MoryStateKind, { title: string; message: string }> = {
+diff -ruN a/packages/ui/src/mory/parts/face.tsx b/packages/ui/src/mory/parts/face.tsx
+--- a/packages/ui/src/mory/parts/face.tsx	2026-10-10 01:31:19.000000000 -0700
++++ b/packages/ui/src/mory/parts/face.tsx	2026-10-10 02:02:16.333812736 -0700
+@@ -1,4 +1,4 @@
+-import { Ellipse, G, Path } from "react-native-svg";
++import { Circle, Ellipse, G, Path } from "react-native-svg";
+ import { MORY_COLORS } from "../../theme/mory";
+ import type { MoryExpression } from "../types";
+ 
+@@ -34,6 +34,24 @@
+         ))}
+       </>
+     );
++  if (expression === "surprised")
++    return (
++      <>
++        {/* Wow: brows up, round wide eyes with a glint, and a small round open mouth set high enough to clear held props. */}
++        <Path
++          d="M72 96 Q80 89 89 94 M111 94 Q120 89 128 96"
++          fill="none"
++          stroke={eye}
++          strokeWidth={4}
++          strokeLinecap="round"
++        />
++        <Circle cx={82} cy={110} r={7.5} fill={eye} />
++        <Circle cx={118} cy={110} r={7.5} fill={eye} />
++        <Circle cx={84.6} cy={107.4} r={2.3} fill={MORY_COLORS.body} />
++        <Circle cx={120.6} cy={107.4} r={2.3} fill={MORY_COLORS.body} />
++        <Ellipse cx={100} cy={120} rx={4.2} ry={5.2} fill={eye} />
++      </>
++    );
+   if (expression === "worried")
+     return (
+       <>
+diff -ruN a/packages/ui/src/mory/types.ts b/packages/ui/src/mory/types.ts
+--- a/packages/ui/src/mory/types.ts	2026-10-10 01:32:58.000000000 -0700
++++ b/packages/ui/src/mory/types.ts	2026-10-10 02:01:38.813812736 -0700
+@@ -20,9 +20,12 @@
+   | "search";
+ export type MoryHeadpiece =
+   "orange" | "apple" | "pear" | "cherry" | "lemon" | "none";
+-/** `starry` is for a great deal; `worried` is for scenes (errors, no results), not a shopper's everyday look. */
++/**
++ * `starry` is for a great deal and `surprised` for a "wow" price drop; `worried` is for scenes (errors, no
++ * results), not a shopper's everyday look.
++ */
+ export type MoryExpression =
+-  "neutral" | "happy" | "wink" | "sleepy" | "starry" | "worried";
++  "neutral" | "happy" | "wink" | "sleepy" | "starry" | "surprised" | "worried";
+ export type MoryHandMotion = "hold" | "wave" | "tap";
+ export type MoryMotion = {
+   body?: "bob" | "still";
+diff -ruN a/packages/ui/test/mory.test.mts b/packages/ui/test/mory.test.mts
+--- a/packages/ui/test/mory.test.mts	2026-10-10 01:32:58.000000000 -0700
++++ b/packages/ui/test/mory.test.mts	2026-10-10 02:01:38.865812736 -0700
+@@ -125,6 +125,23 @@
+   }
+ });
+ 
++test("a surprised look is the shopper's default, and a scene can still ask for it explicitly", () => {
++  const look = { headpiece: "lemon", expression: "surprised" } as const;
++  assert.equal(
++    resolveMory({ size: 120, pose: "drop" }, look).expression,
++    "surprised",
++  );
++  assert.equal(
++    resolveMory({ size: 120, pose: "drop", expression: "surprised" })
++      .expression,
++    "surprised",
++  );
++  assert.equal(
++    resolveMory({ size: 120, expression: "happy" }, look).expression,
++    "happy",
++  );
++});
++
+ test("the bell rings and the drop card hops early in the turn, then rest without a jump", () => {
+   for (const t of [0, 0.32, 0.5, 0.99, 1]) assert.equal(ringAngle(t), 0);
+   assert.ok(Math.abs(ringAngle(0.3199999)) < 0.01);

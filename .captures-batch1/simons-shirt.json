@@ -1,0 +1,128 @@
+{
+  "taskId": "1146de45-8032-4c6f-9f65-0f98d2f14038",
+  "attemptId": "7440e720-f73e-4dc1-9469-7c9bcbf727f3",
+  "status": "needs_review",
+  "auditId": "product-page/2026-10-11/www.simons.ca/90b5ac252a194a7b/1146de45-8032-4c6f-9f65-0f98d2f14038--7440e720-f73e-4dc1-9469-7c9bcbf727f3",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "needs_review",
+    "products": [],
+    "issues": [
+      "Product title is not supported by the source"
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:47:50.103Z",
+        "completedAt": "2026-10-11T01:47:50.121Z",
+        "durationMs": 17.567,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 59697,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 4973.5,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 60.725,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 311.692,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 18.178,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 26.663,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 4514.588,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 30.466,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 7.54,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 7182,
+      "outputTokens": 774,
+      "requestMs": 4511.826
+    }
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "taskId": "5d5bd548-59c6-41c4-b015-e0ee682d20c5",
+  "attemptId": "67a7e23d-d9f8-43d4-a932-8620115e85c4",
+  "status": "needs_review",
+  "auditId": "product-page/2026-10-11/www.bestbuy.com/3e4aef5c2576af03/5d5bd548-59c6-41c4-b015-e0ee682d20c5--67a7e23d-d9f8-43d4-a932-8620115e85c4",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "needs_review",
+    "issues": [
+      "No verified concrete price"
+    ],
+    "products": [
+      {
+        "url": "https://www.bestbuy.com/product/beats-solo-4-wireless-on-ear-headphones-matte-black/JJGCQXWKWL/sku/12223857",
+        "title": "Beats - Solo 4 Wireless On-Ear Headphones - Matte Black",
+        "brand": "Beats",
+        "sku": "12223857",
+        "images": [
+          "https://pisces.bbystatic.com/image2/BestBuy_US/images/products/6501/6501020_sd.jpg;maxHeight=1920;maxWidth=900?format=webp"
+        ],
+        "offers": [],
+        "evidence": "page.md"
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:48:39.932Z",
+        "completedAt": "2026-10-11T01:48:40.001Z",
+        "durationMs": 69.454,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-1.body"
+      }
+    ],
+    "selectedCapture": 1
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 54782,
+      "acquisition": {
+        "mode": "browser",
+        "browser": "camoufox",
+        "blockResources": [
+          "image",
+          "media",
+          "font"
+        ],
+        "actions": [],
+        "timeoutMs": 30000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 9387.339,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 60.068,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 5224.562,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 73.878,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 45.89,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 3854.511,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 116.832,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 8.121,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 5109,
+      "outputTokens": 722,
+      "requestMs": 3852.653
+    }
+  }
+}

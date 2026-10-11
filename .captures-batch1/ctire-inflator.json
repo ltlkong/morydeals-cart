@@ -1,0 +1,167 @@
+{
+  "taskId": "4bcc91f8-5678-40e2-b829-5aeddfb53a4a",
+  "attemptId": "f0afaec6-82c0-4244-9961-61574f2d13ad",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.canadiantire.ca/2d66266d9f215e80/4bcc91f8-5678-40e2-b829-5aeddfb53a4a--f0afaec6-82c0-4244-9961-61574f2d13ad",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "parsed",
+    "issues": [],
+    "products": [
+      {
+        "url": "https://www.canadiantire.ca/en/pdp/motomaster-20v-digital-portable-tire-inflator-with-2-0-ah-pwr-pod-battery-and-compact-charger-0095222p.html",
+        "title": "MotoMaster 20V Digital Portable Tire Inflator with 2.0 Ah PWR POD Battery and Compact Charger",
+        "brand": "MotoMaster",
+        "sku": "009-5222-4",
+        "images": [
+          "https://media-www.canadiantire.ca/product/automotive/car-care-accessories/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-0a1b04de-c76a-4681-93e4-34ba81a7dc5a-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/car-care-accessories/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-185a53c5-7bdd-42f1-8a20-6e9949953799-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/auto-maintenance/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-6686ba25-1aaf-46cf-a362-87810b81295b-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/car-care-accessories/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-11975191-21a0-4c6f-8294-2cf749bc1a1e-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/car-care-accessories/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-13d4a772-4a90-4612-8f24-e7ef596bb998-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/auto-maintenance/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-f0786115-f79e-434e-b618-221c71a64527-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/auto-maintenance/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-e0f7c925-c0be-4ada-bc68-aace15fa4a11-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/auto-maintenance/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-9b6d1677-a4c0-4e5a-a757-4f6602b39866-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/auto-maintenance/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-ea99b231-5b45-4fb0-b4bd-dcf6375ba2cb-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/automotive/auto-maintenance/auto-shop-equipment-supplies/0095222/motomaster-20v-digital-portable-tire-inflator-86ad1151-7798-4d7b-80ea-875db9bd8cbf-jpgrendition.jpg"
+        ],
+        "offers": [
+          {
+            "amountMinor": 17999,
+            "currency": "CAD",
+            "currencyEvidence": "storefront:www.canadiantire.ca",
+            "url": "https://www.canadiantire.ca/en/pdp/motomaster-20v-digital-portable-tire-inflator-with-2-0-ah-pwr-pod-battery-and-compact-charger-0095222p.html",
+            "evidence": "$179.99"
+          }
+        ],
+        "evidence": "page.md"
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:46:02.565Z",
+        "completedAt": "2026-10-11T01:46:02.588Z",
+        "durationMs": 22.822,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing",
+        "captureFile": "response-0.body"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:46:02.588Z",
+        "completedAt": "2026-10-11T01:46:08.056Z",
+        "durationMs": 5468.19,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-2.body"
+      }
+    ],
+    "selectedCapture": 2
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 59297,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 13897.132,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 58.571,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 723.273,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 5494.09,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 42.055,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 7465.627,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 81.157,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 26.186,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 13285,
+      "outputTokens": 1998,
+      "requestMs": 7462.26
+    }
+  }
+}

@@ -1,0 +1,57 @@
+When using a proxy, it is heavily recommended that you pass `geoip=True`. at file:///Users/tielinli/Workspace/morydeals-cart/node_modules/camoufox-js/dist/warnings.js:21
+{
+  "status": "failed",
+  "auditId": "product-page/2026-10-11/ca.frankandoak.com/a0b5390a1b153a1d/f90d54ea-8f84-4a61-8d89-7daf86b8c050--6e1f2ded-ce08-4f28-a8ec-baaefdae36b3",
+  "timings": {
+    "scope": "failed",
+    "totalMs": 4917.684,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 58.556,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 4796.468,
+        "status": "failed"
+      },
+      "archive": {
+        "durationMs": 53.498,
+        "status": "completed"
+      },
+      "databaseFailure": {
+        "durationMs": 6.871,
+        "status": "completed"
+      }
+    }
+  },
+  "reason": "http_error",
+  "acquisition": {
+    "version": 1,
+    "status": "failed",
+    "reason": "http_error",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:47:29.808Z",
+        "completedAt": "2026-10-11T01:47:30.477Z",
+        "durationMs": 669.576,
+        "status": "failed",
+        "reason": "http_error",
+        "message": "HTTP 404"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:47:30.477Z",
+        "completedAt": "2026-10-11T01:47:34.603Z",
+        "durationMs": 4125.502,
+        "status": "failed",
+        "reason": "http_error",
+        "message": "HTTP 404"
+      }
+    ]
+  },
+  "error": "HTTP 404"
+}

@@ -1,0 +1,152 @@
+{
+  "taskId": "bd600408-1ac4-47ac-82f1-fc1bc9de0c86",
+  "attemptId": "abc4c720-8fe7-41cc-b10d-76b2cf60ca7e",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.walmart.ca/96ec36da71430292/bd600408-1ac4-47ac-82f1-fc1bc9de0c86--abc4c720-8fe7-41cc-b10d-76b2cf60ca7e",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "walmart-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.walmart.ca/en/ip/Apple-iPhone-17-Pro-512-GB-Brand-New-6-3-inch-Display-ProMotion-120Hz-A19-Chip-Fusion-Camera-System-Center-Stage-Front-Cosmic-Orange/7FCE4OX0I72T",
+        "title": "Apple iPhone 17 Pro 512 GB: Brand New - 6.3-inch Display with ProMotion up to 120Hz, A19 Pro Chip, Pro Fusion Camera System with Center Stage Front Camera - Cosmic Orange",
+        "sku": "7FCE4OX0I72T",
+        "rating": {
+          "value": 5,
+          "scale": 5,
+          "count": 2,
+          "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.averageRating"
+        },
+        "brand": "iPhone",
+        "description": "FLEXIBLE. SECURE. SEAMLESS , DURABLE CERAMIC SHIELD. FRONT AND BACK",
+        "images": [
+          "https://i5.walmartimages.ca/asr/e6a9cfcb-f48e-4de9-84f4-ba9c9af47c33.bc02c41b942a926cb467a751b08f9a38.jpeg",
+          "https://i5.walmartimages.ca/asr/b7b67a64-5802-4156-b79d-766e9bb8ab83.91822eb358fd92b8498d12cf876590a5.jpeg",
+          "https://i5.walmartimages.ca/asr/f54531a2-632e-4301-9b4f-f01fbc741b01.6f13f81b15115b99b9cd61f01c02843d.jpeg",
+          "https://i5.walmartimages.ca/asr/3a909a88-0fce-4ac1-8f95-266d094ca58f.0f66d128e2bc17519e3fc908f035a507.jpeg",
+          "https://i5.walmartimages.ca/asr/c6a05739-a949-480f-a2d3-90ed41274a44.f974b8c8acb2cfcb64f2a7dc1b87e90e.jpeg"
+        ],
+        "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product",
+        "offers": [
+          {
+            "amountMinor": 264998,
+            "currency": "CAD",
+            "currencyEvidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.currentPrice.currencyUnit",
+            "seller": "Cellulartech",
+            "url": "https://www.walmart.ca/en/ip/Apple-iPhone-17-Pro-512-GB-Brand-New-6-3-inch-Display-ProMotion-120Hz-A19-Chip-Fusion-Camera-System-Center-Stage-Front-Cosmic-Orange/7FCE4OX0I72T",
+            "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.currentPrice.price",
+            "availability": "OutOfStock"
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:45:08.532Z",
+        "completedAt": "2026-10-11T01:45:09.954Z",
+        "durationMs": 1422.387,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "walmart-ca",
+    "evidence": [
+      "url:www.walmart.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "selector": "script#__NEXT_DATA__"
+        }
+      },
+      "parsing": {
+        "strategy": "walmart-ca"
+      },
+      "fallback": [
+        {
+          "on": [
+            "blocked",
+            "incomplete",
+            "http_error",
+            "unsupported_content"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "minTextLength": 80
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 1530.714,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 52.639,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.89,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 1423.528,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 1.465,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 9.685,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 23.293,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 16.069,
+        "status": "completed"
+      }
+    }
+  }
+}

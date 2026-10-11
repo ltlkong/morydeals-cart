@@ -1,0 +1,4 @@
+src/generated/
+dist/
+prisma/migrations/
+test/fixtures/retailers/

@@ -1,0 +1,48 @@
+{
+  "name": "morydeals",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/ui",
+    "apps/ui-showcase",
+    "apps/worker",
+    "apps/browser-service",
+    "apps/api",
+    "apps/mobile",
+    "packages/capture-contracts"
+  ],
+  "scripts": {
+    "start": "npm run start -w @morydeals/ui-showcase",
+    "web": "npm run web -w @morydeals/ui-showcase",
+    "ios": "npm run ios -w @morydeals/ui-showcase",
+    "android": "npm run android -w @morydeals/ui-showcase",
+    "typecheck": "tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/ui-showcase/tsconfig.json && npm run typecheck -w @morydeals/worker && npm run typecheck -w @morydeals/browser-service && npm run typecheck -w @morydeals/api && npm run typecheck -w @morydeals/mobile",
+    "test": "node --experimental-strip-types --test packages/ui/test/*.test.mts && npm test -w @morydeals/worker && npm test -w @morydeals/api && npm test -w @morydeals/mobile",
+    "check": "npm run tokens:check -w @morydeals/ui && npm run lint -w @morydeals/worker && npm run format:check -w @morydeals/worker && npm run typecheck && npm test && npm run lint -w @morydeals/api && npm run format:check -w @morydeals/api",
+    "build:web": "npm run build:web -w @morydeals/ui-showcase",
+    "crawler": "npm run cli -w @morydeals/worker --",
+    "worker": "npm run worker -w @morydeals/worker",
+    "test:crawler:integration": "npm run test:integration -w @morydeals/worker",
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "crawler:browser:install": "npm run browser:install -w @morydeals/worker",
+    "browser:serve": "npm run start -w @morydeals/browser-service",
+    "test:crawler:browser": "npm run test:browser -w @morydeals/worker",
+    "build:worker": "npm run build -w @morydeals/worker",
+    "db:generate": "npm run db:generate -w @morydeals/worker",
+    "db:migrate": "npm run db:migrate -w @morydeals/worker",
+    "api": "npm run start -w @morydeals/api",
+    "mobile": "npm run start -w @morydeals/mobile",
+    "mobile:ios": "npm run ios -w @morydeals/mobile",
+    "mobile:web": "npm run web -w @morydeals/mobile",
+    "build:api": "npm run build -w @morydeals/api"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "playwright": "1.62.0",
+    "typescript": "~6.0.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

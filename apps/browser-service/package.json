@@ -1,0 +1,1 @@
+{"name":"@morydeals/browser-service","version":"0.1.0","private":true,"type":"module","scripts":{"start":"tsx src/main.ts","typecheck":"tsc --noEmit"},"dependencies":{"camoufox-js":"0.12.1","playwright":"1.62.0","tsx":"4.23.15"},"devDependencies":{"@types/node":"^26.6.4"}}

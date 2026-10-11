@@ -1,0 +1,300 @@
+{
+  "taskId": "651fd0d1-c24b-4cf7-b191-674ac09e9827",
+  "attemptId": "ad5dfcc8-5311-4783-a723-a2c0cddab738",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.amazon.ca/1190dd53d86870bb/651fd0d1-c24b-4cf7-b191-674ac09e9827--ad5dfcc8-5311-4783-a723-a2c0cddab738",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "amazon-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.amazon.ca/dp/B0DT494JX5",
+        "title": "monTEK Heavy Duty Full Motion TV Wall Mount for 37-90 Inch TVs up to 165 lb",
+        "sku": "B0DT494JX5",
+        "variant": {
+          "id": "B0DT494JX5",
+          "label": "37-90\" Full Motion TV Wall Mount",
+          "options": [
+            {
+              "name": "Size",
+              "value": "37-90\" Full Motion TV Wall Mount"
+            }
+          ],
+          "evidence": "#twister selected dimensions"
+        },
+        "rating": {
+          "value": 4.6,
+          "scale": 5,
+          "count": 736,
+          "evidence": "#averageCustomerReviews"
+        },
+        "brand": "monTEK",
+        "badges": [
+          "Amazon's Choice"
+        ],
+        "boughtRecently": "100+ bought in past month",
+        "categories": [
+          "Electronics",
+          "Televisions & Video",
+          "Accessories",
+          "TV Mounts, Stands & Turntables",
+          "TV Wall & Ceiling Mounts"
+        ],
+        "specifications": [
+          {
+            "name": "Mounting type",
+            "value": "Wall Mount"
+          },
+          {
+            "name": "Movement type",
+            "value": "Articulating"
+          },
+          {
+            "name": "Brand",
+            "value": "monTEK"
+          },
+          {
+            "name": "Material",
+            "value": "Alloy Steel"
+          },
+          {
+            "name": "Colour",
+            "value": "Black"
+          },
+          {
+            "name": "Compatible devices",
+            "value": "Television"
+          },
+          {
+            "name": "Maximum tilt angle",
+            "value": "15 degrees"
+          },
+          {
+            "name": "Unit count",
+            "value": "1 count"
+          },
+          {
+            "name": "Number of Packs",
+            "value": "1"
+          },
+          {
+            "name": "Item Highlight",
+            "value": "Dual Articulating Arms Extend 16.6 in, Tool-Free Tilt, ±60° Swivel, 4X Load Tested, Max VESA 600x400 mm, 12/16 in Wood Studs"
+          },
+          {
+            "name": "Manufacturer",
+            "value": "monTEK"
+          },
+          {
+            "name": "Number of Items",
+            "value": "1"
+          },
+          {
+            "name": "Country of Origin",
+            "value": "China"
+          },
+          {
+            "name": "Item Type Name",
+            "value": "television-ceiling-and-wall-mounts"
+          },
+          {
+            "name": "Item Weight",
+            "value": "6.35 kg"
+          },
+          {
+            "name": "Manufacturer Contact Information",
+            "value": "China"
+          },
+          {
+            "name": "Model Number",
+            "value": "HW1271BK"
+          },
+          {
+            "name": "Mfr Part Number",
+            "value": "HW1271BK"
+          },
+          {
+            "name": "ASIN",
+            "value": "B0DT494JX5"
+          },
+          {
+            "name": "Enclosure Material",
+            "value": "Alloy Steel"
+          },
+          {
+            "name": "Maximum-Supported Screen Size",
+            "value": "90 inches"
+          },
+          {
+            "name": "Minimum-Supported Screen Size",
+            "value": "37 inches"
+          },
+          {
+            "name": "Product Dimensions",
+            "value": "67.56 x 7.11 x 42.42 cm; 6.35 kg"
+          },
+          {
+            "name": "Item model number",
+            "value": "HW1271BK"
+          },
+          {
+            "name": "Country/Region of origin",
+            "value": "China"
+          }
+        ],
+        "offerSummary": {
+          "count": 4,
+          "fromMinor": 7185,
+          "currency": "CAD",
+          "text": "New & Used (4) from $71.85"
+        },
+        "images": [
+          "https://m.media-amazon.com/images/I/71c-zvwHMZL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71beFq9rkML._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71Sxq2ncMML._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/711K9cUTNXL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71KFSPmpo9L._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71iEG0hCbVL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71OYAlEHzlL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71o7Ctaa1zL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71b5yyq1tuL._AC_SL1500_.jpg"
+        ],
+        "description": "About this item TV WALL MOUNT COMPATIBLITY: This Ultra slim TV wall mount fits for most of 37-90 inch LCD/LED/OLED TVs with VESA patterns 100x200 mm up to 600x400 mm and up to 165 lbs. Designed for installation on 12/16\" wood studs, concrete, and brick walls. (Do not install the mount on drywall alone!) Perfect for TV installation in living room, kitchen, bedroom, office or any other place ULTRA SLIM & DISCREET DESIGN: This TV wall mount has been cleverly designed to retract to a mere 2.75 inches from the wall, ensuring a super slim profile that merges flawlessly with your living space. Its design leaves ample room for your creative home décor and with a velcro for cable management, all your cables are neatly organized and hidden, enhancing the neatness and elegance of your space COMFORTABLE VIEWING EXPERIENCE: The monTEK full motion TV wall mount tilts +5°/-15° without tools to reduce glare, extend your TV 16.6″ from the wall and swivel +/-60° for dynamic adjustability to achieve an optimal viewing experience (note that maximum rotation depends on screen size). Level your screen +/-3° after installation to fine tune the TV's position SECURE TV MOUNT: Choose our monTEK TV Wall Mount for reliable TV stability. With 6 tilt and swivel arms, enjoy smooth, optimal viewing angles. Capable of holding up to 165lbs, it's built from heavy-duty steel and features a durable faceplate and secure screws. Having passed a rigorous 4x max load test, this mount combines strong construction and articulating arms for unmatched safety QUICK & EASY INSTALLATION: DTV mount comes with decent instruction, bubble level and necessary hardware in pre-labeled bags for easier installation. Simply attach the TV brackets, mount the wall plate, then hang your TV. Designed for durability, this tv mount offers reliable after-sales service and technical support. Feel free to reach out with any queries › See more product details",
+        "evidence": "#ASIN + #productTitle",
+        "offers": [
+          {
+            "amountMinor": 8299,
+            "currency": "CAD",
+            "currencyEvidence": "#currencyOfPreference / purchase option",
+            "url": "https://www.amazon.ca/dp/B0DT494JX5",
+            "seller": "Densch",
+            "shipsFrom": "Amazon",
+            "condition": "new",
+            "evidence": "#desktop_buybox/newAccordionRow + #apex_desktop_newAccordionRow",
+            "availability": "InStock"
+          },
+          {
+            "amountMinor": 7185,
+            "currency": "CAD",
+            "currencyEvidence": "#currencyOfPreference / purchase option",
+            "url": "https://www.amazon.ca/dp/B0DT494JX5",
+            "seller": "Warehouse Deals",
+            "shipsFrom": "Amazon",
+            "stockQuantity": 1,
+            "condition": "used",
+            "evidence": "#desktop_buybox/usedAccordionRow + #apex_desktop_usedAccordionRow",
+            "availability": "LimitedAvailability"
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:41:01.249Z",
+        "completedAt": "2026-10-11T01:41:03.585Z",
+        "durationMs": 2336.23,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "amazon-ca",
+    "evidence": [
+      "url:www.amazon.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "selector": "#productTitle"
+        }
+      },
+      "parsing": {
+        "strategy": "amazon-ca"
+      },
+      "fallback": [
+        {
+          "on": [
+            "blocked",
+            "incomplete",
+            "http_error",
+            "unsupported_content"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "selector": "#productTitle"
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 2554.711,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 60.654,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.84,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 2339.264,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 6.409,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 54.194,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 68.785,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 21.373,
+        "status": "completed"
+      }
+    }
+  }
+}

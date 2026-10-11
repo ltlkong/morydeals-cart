@@ -1,0 +1,9 @@
+[
+  {
+    "id": "ca",
+    "urlsEnv": "CA_PROXY_URLS",
+    "maxSessions": 10,
+    "maxSessionUses": 50,
+    "maxSessionAgeSecs": 600
+  }
+]

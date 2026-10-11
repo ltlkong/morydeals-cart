@@ -1,0 +1,61 @@
+When using a proxy, it is heavily recommended that you pass `geoip=True`. at file:///Users/tielinli/Workspace/morydeals-cart/node_modules/camoufox-js/dist/warnings.js:21
+{
+  "status": "failed",
+  "auditId": "product-page/2026-10-11/www.amazon.ca/8f3029f2adf4c30e/74486b65-897a-47e7-81cd-7bb58c6727de--e0e2fbf7-3ecd-4009-9f14-7466deee1c70",
+  "timings": {
+    "scope": "failed",
+    "totalMs": 3760.245,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 56.09,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.934,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 3679.491,
+        "status": "failed"
+      },
+      "archive": {
+        "durationMs": 15.564,
+        "status": "completed"
+      },
+      "databaseFailure": {
+        "durationMs": 5.552,
+        "status": "completed"
+      }
+    }
+  },
+  "reason": "http_error",
+  "acquisition": {
+    "version": 1,
+    "status": "failed",
+    "reason": "http_error",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:39:37.735Z",
+        "completedAt": "2026-10-11T01:39:38.048Z",
+        "durationMs": 312.113,
+        "status": "failed",
+        "reason": "http_error",
+        "message": "HTTP 404"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:39:38.048Z",
+        "completedAt": "2026-10-11T01:39:41.414Z",
+        "durationMs": 3366.674,
+        "status": "failed",
+        "reason": "http_error",
+        "message": "HTTP 404"
+      }
+    ]
+  },
+  "error": "HTTP 404"
+}

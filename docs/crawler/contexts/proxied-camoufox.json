@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "locale": "en-CA",
+  "acquisition": {
+    "mode": "browser",
+    "browser": "camoufox",
+    "network": { "proxyProfile": "ca", "rotation": "session" }
+  }
+}

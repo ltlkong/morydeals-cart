@@ -1,0 +1,165 @@
+{
+  "taskId": "ba68b864-3fe1-47cd-9e43-7c0cb07b22e4",
+  "attemptId": "f7268060-9dd6-498d-b4f0-8ad8064ebacc",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.walmart.ca/d539482ea05aadcc/ba68b864-3fe1-47cd-9e43-7c0cb07b22e4--f7268060-9dd6-498d-b4f0-8ad8064ebacc",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "walmart-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.walmart.ca/en/ip/Shark-HZ600C-UltraLight-Pet-Pro-Corded-Stick-with-PowerFins-and-Self-Cleaning-Brushroll/6000204703956",
+        "title": "Shark HZ600C UltraLight Pet Pro Corded Stick with PowerFins and Self-Cleaning Brushroll",
+        "sku": "6000204703956",
+        "rating": {
+          "value": 4.33,
+          "scale": 5,
+          "count": 216,
+          "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.averageRating"
+        },
+        "brand": "Shark",
+        "description": "The Shark UltraLight Pet Pro is equipped with a PowerFins brushroll, engineered to pick up more hair with no hair wrap (vs. Shark bristle brushrolls). Versatile enough to clean on and above the floor—even under furniture. Its hand vac weighs less than 3 lbs. and is packed with power. The LED headlights on the floor nozzle illuminate hidden debris.",
+        "images": [
+          "https://i5.walmartimages.ca/asr/2e59fd87-fb9c-4fc0-a300-66e7a3d1004d.cc1aa3e647e666872144187d20938bbe.jpeg",
+          "https://i5.walmartimages.ca/asr/26952e9c-1bd3-43b4-9fd8-b0315156a13b.1030185aeac966f184bef9d6b0644095.jpeg",
+          "https://i5.walmartimages.ca/asr/d25cdf1e-2bb0-4398-add4-346c7fd07bdd.983c586bbb91218b00ac5c28ebc178bd.jpeg",
+          "https://i5.walmartimages.ca/asr/c9ff0c89-42b7-4dc8-a482-fca5973a9204.28cd027f5baab2edef9051edfb25a062.jpeg",
+          "https://i5.walmartimages.ca/asr/a9e29a04-a077-4d4f-9bc1-2b010d948ef5.5c6cef810a2e14604c14694bb53adb70.jpeg",
+          "https://i5.walmartimages.ca/asr/2f41e842-bfb8-44da-ace4-476d994bed16.dde32600011c0be60fad31ac97162831.jpeg",
+          "https://i5.walmartimages.ca/asr/1f5e8e60-0a20-49d9-bd08-e09216d67132.9e6dbeb4023dc3e2c6c077fd0eef7c08.jpeg",
+          "https://i5.walmartimages.ca/asr/f6aa6c1c-35f7-44ae-b9f5-6cc56ea65d3b.edb923d00e21472957d23e27ff50941f.jpeg",
+          "https://i5.walmartimages.ca/asr/c5773dd8-f5e3-47c5-9dc2-d8a7c085f500.c78fc278ac45e09284c8c0b7cb36a334.jpeg"
+        ],
+        "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product",
+        "offers": [
+          {
+            "amountMinor": 4900,
+            "compareAtAmountMinor": 24998,
+            "compareAtEvidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.wasPrice.price",
+            "currency": "CAD",
+            "currencyEvidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.currentPrice.currencyUnit",
+            "seller": "Walmart",
+            "url": "https://www.walmart.ca/en/ip/Shark-HZ600C-UltraLight-Pet-Pro-Corded-Stick-with-PowerFins-and-Self-Cleaning-Brushroll/6000204703956",
+            "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.currentPrice.price",
+            "availability": "OutOfStock",
+            "promotions": [
+              {
+                "type": "sale",
+                "text": "Clearance",
+                "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.priceDisplayCodes.clearance"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:45:15.443Z",
+        "completedAt": "2026-10-11T01:45:16.999Z",
+        "durationMs": 1556.226,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "walmart-ca",
+    "evidence": [
+      "url:www.walmart.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "selector": "script#__NEXT_DATA__"
+        }
+      },
+      "parsing": {
+        "strategy": "walmart-ca"
+      },
+      "fallback": [
+        {
+          "on": [
+            "blocked",
+            "incomplete",
+            "http_error",
+            "unsupported_content"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "minTextLength": 80
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 1673.276,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 58.55,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.826,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 1557.09,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 1.685,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 10.922,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 23.943,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 17.315,
+        "status": "completed"
+      }
+    }
+  }
+}

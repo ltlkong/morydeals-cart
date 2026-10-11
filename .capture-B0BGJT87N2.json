@@ -1,0 +1,312 @@
+{
+  "taskId": "c531f5aa-4993-4f1b-a138-61218ee9e349",
+  "attemptId": "5a2783c7-48f8-463b-94c7-46c95f90006a",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.amazon.ca/c77176e058f36c86/c531f5aa-4993-4f1b-a138-61218ee9e349--5a2783c7-48f8-463b-94c7-46c95f90006a",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "amazon-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.amazon.ca/dp/B0BGJT87N2",
+        "title": "Razer Naga V2 HyperSpeed Wireless MMO Gaming Mouse, 400 Hr Battery, Black",
+        "sku": "B0BGJT87N2",
+        "variant": {
+          "id": "B0BGJT87N2",
+          "label": "Naga V2 HyperSpeed",
+          "options": [
+            {
+              "name": "Size",
+              "value": "Naga V2 HyperSpeed"
+            }
+          ],
+          "evidence": "#twister selected dimensions"
+        },
+        "rating": {
+          "value": 4,
+          "scale": 5,
+          "count": 1422,
+          "evidence": "#averageCustomerReviews"
+        },
+        "brand": "Razer",
+        "boughtRecently": "400+ bought in past month",
+        "categories": [
+          "Video Games",
+          "PC",
+          "Accessories",
+          "Gaming Mice"
+        ],
+        "specifications": [
+          {
+            "name": "Brand",
+            "value": "Razer"
+          },
+          {
+            "name": "Colour",
+            "value": "Black"
+          },
+          {
+            "name": "Connectivity technology",
+            "value": "Bluetooth, USB"
+          },
+          {
+            "name": "Movement detection technology",
+            "value": "Optical"
+          },
+          {
+            "name": "Additional Features",
+            "value": "Focus Pro 30K Optical Sensor, HyperScroll Technology, Mechanical Mouse Switches Gen-2, Programmable Buttons, Up to 400 Hr Battery Life"
+          },
+          {
+            "name": "Movement Detection",
+            "value": "Optical"
+          },
+          {
+            "name": "Button Quantity",
+            "value": "19"
+          },
+          {
+            "name": "Hand Orientation",
+            "value": "Right"
+          },
+          {
+            "name": "Compatible Devices",
+            "value": "Personal Computer"
+          },
+          {
+            "name": "Operating System",
+            "value": "Linux, Windows 7, Windows XP"
+          },
+          {
+            "name": "Battery Average Life",
+            "value": "400 hours"
+          },
+          {
+            "name": "Number of Batteries",
+            "value": "1 AA batteries required. (included)"
+          },
+          {
+            "name": "Hardware Platform",
+            "value": "PC"
+          },
+          {
+            "name": "Power Source",
+            "value": "Battery Powered"
+          },
+          {
+            "name": "Mouse Maximum Sensitivity",
+            "value": "30000 dots_per_inch"
+          },
+          {
+            "name": "Minimum Required Operating System Version",
+            "value": "Windows 7"
+          },
+          {
+            "name": "Embellishment Feature",
+            "value": "Logo"
+          },
+          {
+            "name": "Range",
+            "value": "10.0 meters"
+          },
+          {
+            "name": "Style Name",
+            "value": "Modern"
+          },
+          {
+            "name": "Theme",
+            "value": "Video Game"
+          },
+          {
+            "name": "Enclosure Material",
+            "value": "Plastic"
+          },
+          {
+            "name": "Finish",
+            "value": "Rubberized Grip"
+          },
+          {
+            "name": "Model Name",
+            "value": "Naga V2"
+          },
+          {
+            "name": "Antenna Location",
+            "value": "Gaming"
+          },
+          {
+            "name": "Model Number",
+            "value": "RZ01-03600100-R3U1"
+          },
+          {
+            "name": "Country of Origin",
+            "value": "Thailand"
+          },
+          {
+            "name": "Included Components",
+            "value": "Charging Cable, Dongle, Dongle Adapter, Mice, Side Plates"
+          },
+          {
+            "name": "Manufacturer",
+            "value": "Razer"
+          },
+          {
+            "name": "UPC",
+            "value": "840272904732"
+          },
+          {
+            "name": "Item Type Name",
+            "value": "Gaming Mice"
+          }
+        ],
+        "offerSummary": {
+          "count": 2,
+          "condition": "new",
+          "fromMinor": 7928,
+          "currency": "CAD",
+          "text": "New (2) from $79.28"
+        },
+        "images": [
+          "https://m.media-amazon.com/images/I/61YULkQowXL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/61pl5xLez7L._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/61Pch16IuTL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/81kKJDzgVrL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/61sFLe9lmXL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/71GYopTZEWL._AC_SL1500_.jpg",
+          "https://m.media-amazon.com/images/I/61o3awCWG8L._AC_SL1500_.jpg"
+        ],
+        "description": "About this item 19 PROGRAMMABLE BUTTONS — Armed with ergonomically positioned buttons that provide an arsenal of commands at the fingertips for mapping out the essentials or going all out with advanced macros RAZER HYPERSPEED WIRELESS (2.4 GHZ) AND BLUETOOTH — Unleash seamless, low-latency performance that's 25% faster than other wireless tech or switch to Bluetooth for longer hours of gaming POWERED BY RAZER HYPERSCROLL TECHNOLOGY — Perform repeated commands rapidly or blaze through content in free-spin mode, or activate tactile mode for enhanced precision and satisfying feedback LONG BATTERY LIFE — With up to 400 hours on Bluetooth and 250 hours of seamless low-latency gaming on Razer HyperSpeed Wireless (2.4GHz), last longer in the heat of battle with this mouse before having to replace its battery FOCUS PRO 30K OPTICAL SENSOR — Razer’s brand-new sensor provides flawless tracking performance on a wider variety of surfaces including glass —supported by intelligent functions for enhanced aim and control MECHANICAL MOUSE SWITCHES GEN 2 — With gold-plated contact points, the switches are less prone to degrading and have a longer lifespan of up to 60 million clicks #1 SELLING PC GAMING PERIPHERALS BRAND IN THE U.S. — Source — Circana, Retail Tracking Service, U.S., Dollar Sales, Gaming Designed Mice, Keyboards, and PC Headsets, Jan. 2019- Dec. 2023 combined OPTIMIZE MOUSE ACCURACY — Improve accuracy by disabling the \"Enhance pointer precision\" option in the Windows mouse settings, and further optimize performance using the Razer Synapse App › See more product details",
+        "evidence": "#ASIN + #productTitle",
+        "offers": [
+          {
+            "amountMinor": 11996,
+            "currency": "CAD",
+            "currencyEvidence": "#currencyOfPreference / purchase option",
+            "url": "https://www.amazon.ca/dp/B0BGJT87N2",
+            "seller": "Amazon.ca",
+            "shipsFrom": "Amazon.ca",
+            "fee": "$0.55 eco fee might apply",
+            "condition": "new",
+            "evidence": "#desktop_buybox/featured + #apex_desktop",
+            "availability": "InStock",
+            "promotions": [
+              {
+                "type": "other",
+                "text": "90 days free of Amazon Music with purchase",
+                "promotionId": "A10CGXW1D17BNQ",
+                "evidence": "PromotionsDiscovery"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:38:06.807Z",
+        "completedAt": "2026-10-11T01:38:08.878Z",
+        "durationMs": 2071.343,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "amazon-ca",
+    "evidence": [
+      "url:www.amazon.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "selector": "#productTitle"
+        }
+      },
+      "parsing": {
+        "strategy": "amazon-ca"
+      },
+      "fallback": [
+        {
+          "on": [
+            "blocked",
+            "incomplete",
+            "http_error",
+            "unsupported_content"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "selector": "#productTitle"
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 2305.024,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 58.431,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.854,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 2074.529,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 6.5,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 51.711,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 90.464,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 19.587,
+        "status": "completed"
+      }
+    }
+  }
+}

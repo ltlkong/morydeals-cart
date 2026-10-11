@@ -1,0 +1,85 @@
+{
+  "taskId": "d75b1205-ccb2-40cb-be9f-97159529bde7",
+  "attemptId": "b0cd4f04-0fda-42df-add1-a043efbc8a03",
+  "status": "ready",
+  "auditId": "product-page/2026-10-11/www.bestbuy.ca/f0280bdc892cf9fd/d75b1205-ccb2-40cb-be9f-97159529bde7--b0cd4f04-0fda-42df-add1-a043efbc8a03",
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:29:38.831Z",
+        "completedAt": "2026-10-11T01:29:43.367Z",
+        "durationMs": 4536.241,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-2.body"
+      }
+    ],
+    "selectedCapture": 2
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "bestbuy-ca",
+    "evidence": [
+      "url:www.bestbuy.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "browser",
+        "browser": "camoufox",
+        "blockResources": [
+          "image",
+          "media",
+          "font"
+        ],
+        "actions": [],
+        "timeoutMs": 30000,
+        "waitFor": {
+          "minTextLength": 80
+        }
+      },
+      "parsing": {
+        "strategy": "bestbuy-ca"
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 4618.186,
+    "stages": {
+      "decision": {
+        "durationMs": 0.793,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 4542.087,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 1.972,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 49.846,
+        "status": "completed"
+      }
+    }
+  }
+}

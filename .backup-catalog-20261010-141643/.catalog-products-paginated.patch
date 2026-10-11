@@ -1,0 +1,1100 @@
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index 0add29e..4ec69c2 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
+ import { ApiConfigModule } from "./core/config/config.module.ts";
+ import { ProductsModule } from "./feature/products/products.module.ts";
+ import { CartModule } from "./feature/cart/cart.module.ts";
++import { CatalogModule } from "./feature/catalog/catalog.module.ts";
+ import { HistoryModule } from "./feature/history/history.module.ts";
+ import { ListsModule } from "./feature/lists/lists.module.ts";
+ import { UsersModule } from "./feature/users/users.module.ts";
+@@ -14,6 +15,7 @@ import { SchedulingModule } from "./core/scheduling/scheduling.module.ts";
+     UsersModule,
+     ProductsModule,
+     CartModule,
++    CatalogModule,
+     HistoryModule,
+     ListsModule,
+     ServerModule,
+diff --git a/apps/api/src/feature/catalog/api/catalog.controller.ts b/apps/api/src/feature/catalog/api/catalog.controller.ts
+new file mode 100644
+index 0000000..6fba549
+--- /dev/null
++++ b/apps/api/src/feature/catalog/api/catalog.controller.ts
+@@ -0,0 +1,32 @@
++import {
++  Controller,
++  Get,
++  Inject,
++  Query,
++  SerializeOptions,
++} from "@nestjs/common";
++import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
++import { CatalogService } from "../services/catalog.service.ts";
++import {
++  CatalogPageSchema,
++  CatalogQuerySchema,
++  type CatalogQuery,
++} from "../schema/catalog.schema.ts";
++
++@ApiTags("catalog")
++@Controller("catalog")
++export class CatalogController {
++  constructor(
++    @Inject(CatalogService) private readonly catalog: CatalogService,
++  ) {}
++  @Get("products")
++  @SerializeOptions({ schema: CatalogPageSchema })
++  @ApiResponse({ status: 200, standardSchema: CatalogPageSchema })
++  @ApiOperation({
++    summary:
++      "Products at the enabled stores, newest observed first, a page at a time (pass nextCursor back as cursor)",
++  })
++  products(@Query({ schema: CatalogQuerySchema }) query: CatalogQuery) {
++    return this.catalog.page(query);
++  }
++}
+diff --git a/apps/api/src/feature/catalog/catalog.module.ts b/apps/api/src/feature/catalog/catalog.module.ts
+index 7a90d26..9678679 100644
+--- a/apps/api/src/feature/catalog/catalog.module.ts
++++ b/apps/api/src/feature/catalog/catalog.module.ts
+@@ -1,10 +1,16 @@
+ import { Module } from "@nestjs/common";
+ import { DatabaseModule } from "../../core/database/database.module.ts";
++import { CatalogController } from "./api/catalog.controller.ts";
++import { CatalogService } from "./services/catalog.service.ts";
+ import { ProductLookupService } from "./services/product-lookup.service.ts";
+-/** Read-only product data and price history, shared by the cart, lists and history features. */
++/**
++ * Read-only product data and price history, shared by the cart, lists and history features, and the browsable
++ * catalog (`GET /catalog/products`).
++ */
+ @Module({
+   imports: [DatabaseModule],
+-  providers: [ProductLookupService],
++  controllers: [CatalogController],
++  providers: [ProductLookupService, CatalogService],
+   exports: [ProductLookupService],
+ })
+ export class CatalogModule {}
+diff --git a/apps/api/src/feature/catalog/schema/catalog.schema.ts b/apps/api/src/feature/catalog/schema/catalog.schema.ts
+index cbe75cf..257a8fa 100644
+--- a/apps/api/src/feature/catalog/schema/catalog.schema.ts
++++ b/apps/api/src/feature/catalog/schema/catalog.schema.ts
+@@ -17,3 +17,34 @@ export const ProductDataShape = {
+   /** Up to 90 days of prices, oldest first: Keepa Buy Box history merged with our own captures; null is a gap. */
+   history: z.array(PricePointSchema),
+ };
++
++/** Products a catalog page returns when the caller does not ask for a size, and at most. */
++export const CATALOG_PAGE_SIZE = 20;
++export const CATALOG_PAGE_MAX = 50;
++/**
++ * A page of the shared catalog: `cursor` is the previous page's `nextCursor`; `limit` is clamped to 1…50;
++ * `merchant` keeps one store's products.
++ */
++export const CatalogQuerySchema = z
++  .object({
++    cursor: z.string().max(200).optional(),
++    limit: z.coerce
++      .number()
++      .int()
++      .optional()
++      .transform((limit) =>
++        Math.min(CATALOG_PAGE_MAX, Math.max(1, limit ?? CATALOG_PAGE_SIZE)),
++      ),
++    merchant: z
++      .string()
++      .regex(/^[a-z0-9_-]{1,64}$/i)
++      .optional(),
++  })
++  .strict();
++export type CatalogQuery = z.infer<typeof CatalogQuerySchema>;
++/** Newest observed first; `nextCursor` is null on the last page. */
++export const CatalogPageSchema = z.object({
++  items: z.array(z.object(ProductDataShape)),
++  nextCursor: z.string().nullable(),
++});
++export type CatalogPage = z.infer<typeof CatalogPageSchema>;
+diff --git a/apps/api/src/feature/catalog/services/catalog-cursor.ts b/apps/api/src/feature/catalog/services/catalog-cursor.ts
+new file mode 100644
+index 0000000..686806d
+--- /dev/null
++++ b/apps/api/src/feature/catalog/services/catalog-cursor.ts
+@@ -0,0 +1,36 @@
++import { BadRequestException } from "@nestjs/common";
++
++/**
++ * Where a catalog page ends: the last product's observation time in UTC to the microsecond Postgres stores (so no row
++ * is skipped or repeated at a page edge), and its id to break ties.
++ */
++export type CatalogCursor = { seen: string; id: string };
++
++export function encodeCatalogCursor(cursor: CatalogCursor) {
++  return Buffer.from(JSON.stringify([cursor.seen, cursor.id])).toString(
++    "base64url",
++  );
++}
++
++/** The cursor a previous page returned; anything else is a 400, never a silent first page. */
++export function decodeCatalogCursor(value: string): CatalogCursor {
++  try {
++    const parsed: unknown = JSON.parse(
++      Buffer.from(value, "base64url").toString("utf8"),
++    );
++    if (
++      Array.isArray(parsed) &&
++      parsed.length === 2 &&
++      typeof parsed[0] === "string" &&
++      typeof parsed[1] === "string" &&
++      parsed[1].length > 0 &&
++      parsed[1].length <= 100 &&
++      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(parsed[0]) &&
++      !Number.isNaN(Date.parse(parsed[0]))
++    )
++      return { seen: parsed[0], id: parsed[1] };
++  } catch {
++    // Not base64url JSON: the same 400 as a malformed one.
++  }
++  throw new BadRequestException("invalid_cursor");
++}
+diff --git a/apps/api/src/feature/catalog/services/catalog.service.ts b/apps/api/src/feature/catalog/services/catalog.service.ts
+new file mode 100644
+index 0000000..b86c9eb
+--- /dev/null
++++ b/apps/api/src/feature/catalog/services/catalog.service.ts
+@@ -0,0 +1,65 @@
++import { Inject, Injectable } from "@nestjs/common";
++import { Prisma } from "../../../generated/prisma/client.ts";
++import { PrismaService } from "../../../core/database/services/prisma.service.ts";
++import type { CatalogPage, CatalogQuery } from "../schema/catalog.schema.ts";
++import { ProductLookupService } from "./product-lookup.service.ts";
++import { decodeCatalogCursor, encodeCatalogCursor } from "./catalog-cursor.ts";
++
++/**
++ * The shared product catalog for browsing: every product the worker has stored at an enabled store, the most
++ * recently observed first. Nothing in it says who captured, saved or viewed a product.
++ */
++@Injectable()
++export class CatalogService {
++  constructor(
++    @Inject(PrismaService) private readonly db: PrismaService,
++    @Inject(ProductLookupService) private readonly lookup: ProductLookupService,
++  ) {}
++  async page({ cursor, limit, merchant }: CatalogQuery): Promise<CatalogPage> {
++    const after = cursor ? decodeCatalogCursor(cursor) : null;
++    // Only enabled stores: products from disabled or unlisted (Others) stores are not browsable.
++    const stores = (
++      await this.db.merchant.findMany({ where: { enabled: true } })
++    ).filter((store) => !merchant || store.id === merchant);
++    const domains = [
++      ...new Set(
++        stores.flatMap((store) => store.domains.map((d) => d.toLowerCase())),
++      ),
++    ];
++    if (!domains.length) return { items: [], nextCursor: null };
++    // One extra row says whether another page follows.
++    const rows = await this.db.$queryRaw<
++      { id: string; url: string; seen: string }[]
++    >(Prisma.sql`
++      SELECT p.id, p.url, to_char(p.last_observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS seen
++      FROM public.tracked_products p
++      CROSS JOIN LATERAL (
++        SELECT lower(substring(p.url from '^[A-Za-z][A-Za-z0-9+.-]*://([^/?#:]+)')) AS host
++      ) h
++      WHERE EXISTS (
++        SELECT 1 FROM unnest(${domains}::text[]) AS d(domain)
++        WHERE h.host = d.domain OR right(h.host, length(d.domain) + 1) = '.' || d.domain
++      )
++      ${
++        after
++          ? Prisma.sql`AND (p.last_observed_at, p.id) < (${after.seen}::timestamptz, ${after.id})`
++          : Prisma.empty
++      }
++      ORDER BY p.last_observed_at DESC, p.id DESC
++      LIMIT ${limit + 1}`);
++    const page = rows.slice(0, limit);
++    const last = page.at(-1);
++    const details = await this.lookup.describe(page.map((row) => row.url));
++    return {
++      items: page.flatMap((row) => {
++        const found = details.get(row.url);
++        // A stored product that no longer parses is left out rather than shown half-empty.
++        return found?.product ? [{ url: row.url, ...found }] : [];
++      }),
++      nextCursor:
++        rows.length > limit && last
++          ? encodeCatalogCursor({ seen: last.seen, id: last.id })
++          : null,
++    };
++  }
++}
+diff --git a/apps/api/test/catalog.test.ts b/apps/api/test/catalog.test.ts
+new file mode 100644
+index 0000000..b67f52f
+--- /dev/null
++++ b/apps/api/test/catalog.test.ts
+@@ -0,0 +1,263 @@
++import { DatabaseModule } from "../src/core/database/database.module.ts";
++import { PrismaService } from "../src/core/database/services/prisma.service.ts";
++import "reflect-metadata";
++import { after, before, test } from "node:test";
++import assert from "node:assert/strict";
++import { hash } from "node:crypto";
++import { Global, Module, type INestApplication } from "@nestjs/common";
++import { Test } from "@nestjs/testing";
++import { AppModule } from "../src/app.module.ts";
++import { ApiConfigModule } from "../src/core/config/config.module.ts";
++import {
++  apiConfig,
++  loadApiConfig,
++} from "../src/core/config/schema/config.schema.ts";
++import { QueueModule } from "../src/core/queue/queue.module.ts";
++import { QueueHealthService } from "../src/core/queue/services/queue-health.service.ts";
++import { SchedulingModule } from "../src/core/scheduling/scheduling.module.ts";
++import { configureHttp } from "../src/core/server/http/configure-app.ts";
++import { CaptureQueue } from "../src/feature/products/providers/capture.queue.ts";
++import { encodeCatalogCursor } from "../src/feature/catalog/services/catalog-cursor.ts";
++
++const merchants = [
++  { id: "allowed", domains: ["allowed.shop"], enabled: true },
++  { id: "other", domains: ["other.shop"], enabled: true },
++  { id: "quiet", domains: ["quiet.shop"], enabled: true },
++  { id: "blocked", domains: ["blocked.shop"], enabled: false },
++].map((m, i) => ({
++  ...m,
++  name: m.id,
++  homeUrl: `https://${m.domains[0]}`,
++  logoUrl: null,
++  sortOrder: i,
++}));
++type Row = { id: string; url: string; seen: string; data: unknown };
++// 12 products at enabled stores (pairs share an observation time, so the id tiebreak matters), plus stores the
++// catalog must leave out: a disabled one, an unlisted one and a look-alike domain.
++const rows: Row[] = [
++  ...Array.from({ length: 12 }, (_, i) => {
++    const url = `https://${i % 3 ? "www.allowed.shop" : "other.shop"}/p/${i}`;
++    return {
++      id: `p${String(i).padStart(2, "0")}`,
++      url,
++      seen: `2026-10-0${1 + Math.floor(i / 2)}T12:00:00.000000Z`,
++      data: {
++        url,
++        title: `Product ${i}`,
++        images: [],
++        evidence: "worker evidence",
++        offers: [{ amountMinor: 1000 + i, currency: "CAD", evidence: "x" }],
++      },
++    };
++  }),
++  ...[
++    "https://blocked.shop/p",
++    "https://unlisted.shop/p",
++    "https://notallowed.shop/p",
++  ].map((url, i) => ({
++    id: `x${i}`,
++    url,
++    seen: "2026-10-09T00:00:00.000000Z",
++    data: { url, title: "Hidden", images: [] },
++  })),
++];
++// Stored, but no longer a valid product: kept out of the page without breaking pagination.
++rows.push({
++  id: "p99",
++  url: "https://allowed.shop/broken",
++  seen: "2026-09-30T00:00:00.000000Z",
++  data: { broken: true },
++});
++const host = (url: string) => new URL(url).hostname;
++const queries: unknown[][] = [];
++// Answers the catalog page query like the SQL does: domain match, keyset cursor, newest first, limit.
++function catalogPage(values: unknown[]) {
++  queries.push(values);
++  const [domains, ...rest] = values as [string[], ...unknown[]];
++  const limit = rest.at(-1) as number;
++  const after = rest.length === 3 ? { seen: rest[0], id: rest[1] } : null;
++  return rows
++    .filter((row) =>
++      domains.some(
++        (d) => host(row.url) === d || host(row.url).endsWith("." + d),
++      ),
++    )
++    .filter(
++      (row) =>
++        !after ||
++        row.seen < (after.seen as string) ||
++        (row.seen === after.seen && row.id < (after.id as string)),
++    )
++    .sort((a, b) =>
++      a.seen === b.seen
++        ? b.id.localeCompare(a.id)
++        : b.seen.localeCompare(a.seen),
++    )
++    .slice(0, limit)
++    .map(({ id, url, seen }) => ({ id, url, seen }));
++}
++@Module({
++  providers: [
++    {
++      provide: PrismaService,
++      useValue: {
++        $queryRaw: async (query: { sql?: string; values?: unknown[] }) => {
++          const sql = String(query.sql);
++          if (sql.includes("to_char")) return catalogPage(query.values ?? []);
++          if (sql.includes("external_price_points")) return [];
++          return rows
++            .filter((row) => query.values?.includes(hash("sha256", row.url)))
++            .map(({ url, data }) => ({ url, data }));
++        },
++        merchant: {
++          findMany: async (args?: { where?: { enabled: boolean } }) =>
++            args?.where ? merchants.filter((m) => m.enabled) : merchants,
++        },
++      },
++    },
++  ],
++  exports: [PrismaService],
++})
++class TestDatabaseModule {}
++const config = loadApiConfig({ NODE_ENV: "test", LOG_LEVEL: "silent" });
++@Global()
++@Module({
++  providers: [{ provide: apiConfig.KEY, useValue: config }],
++  exports: [apiConfig.KEY],
++})
++class TestConfigModule {}
++@Module({
++  providers: [
++    { provide: QueueHealthService, useValue: { check: async () => ({}) } },
++  ],
++  exports: [QueueHealthService],
++})
++class TestQueueModule {}
++@Module({})
++class TestSchedulingModule {}
++let app: INestApplication;
++let base: string;
++before(async () => {
++  const module = await Test.createTestingModule({ imports: [AppModule] })
++    .overrideModule(DatabaseModule)
++    .useModule(TestDatabaseModule)
++    .overrideModule(ApiConfigModule)
++    .useModule(TestConfigModule)
++    .overrideModule(QueueModule)
++    .useModule(TestQueueModule)
++    .overrideModule(SchedulingModule)
++    .useModule(TestSchedulingModule)
++    .overrideProvider(CaptureQueue)
++    .useValue({})
++    .compile();
++  app = module.createNestApplication({ logger: false, bodyParser: false });
++  configureHttp(app, config);
++  await app.listen(0, "127.0.0.1");
++  base = await app.getUrl();
++});
++after(async () => app?.close());
++type Page = {
++  items: {
++    url: string;
++    product: Record<string, unknown>;
++    history: unknown[];
++  }[];
++  nextCursor: string | null;
++};
++const get = (query = "") => fetch(`${base}/api/catalog/products${query}`);
++const page = async (query = "") => (await (await get(query)).json()) as Page;
++
++test("the catalog pages through every enabled store's products once, newest first, without a token", async () => {
++  const urls: string[] = [];
++  let cursor: string | null = null;
++  let pages = 0;
++  do {
++    const response = await get(
++      `?limit=5${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
++    );
++    assert.equal(response.status, 200);
++    const body = (await response.json()) as Page;
++    urls.push(...body.items.map((item) => item.url));
++    cursor = body.nextCursor;
++    pages++;
++  } while (cursor && pages < 10);
++  const expected = rows
++    .filter((row) => row.id.startsWith("p") && row.id !== "p99")
++    .sort((a, b) =>
++      a.seen === b.seen
++        ? b.id.localeCompare(a.id)
++        : b.seen.localeCompare(a.seen),
++    )
++    .map((row) => row.url);
++  assert.deepEqual(urls, expected);
++  // 13 rows at enabled stores: 5 + 5 + 3, the broken one counted but not shown.
++  assert.equal(pages, 3);
++});
++
++test("a page carries the product and its history but no worker evidence or user data", async () => {
++  const body = await page("?limit=1");
++  assert.equal(body.items.length, 1);
++  assert.deepEqual(Object.keys(body.items[0]!).sort(), [
++    "history",
++    "product",
++    "url",
++  ]);
++  assert.equal(body.items[0]!.product.title, "Product 11");
++  assert.doesNotMatch(JSON.stringify(body), /evidence|userId|token/);
++  assert.equal(typeof body.nextCursor, "string");
++});
++
++test("the last page has no next cursor, and an exact-size page knows it is the last", async () => {
++  const all = await page("?limit=50");
++  assert.equal(all.items.length, 12);
++  assert.equal(all.nextCursor, null);
++  const exact = await page("?limit=13");
++  assert.equal(exact.nextCursor, null);
++});
++
++test("limit defaults to 20 and is clamped to 1…50", async () => {
++  for (const [query, asked] of [
++    ["", 21],
++    ["?limit=500", 51],
++    ["?limit=0", 2],
++    ["?limit=-3", 2],
++  ] as const) {
++    queries.length = 0;
++    assert.equal((await get(query)).status, 200);
++    assert.equal(queries[0]!.at(-1), asked, query);
++  }
++  assert.equal((await get("?limit=abc")).status, 400);
++  assert.equal((await get("?limit=2.5")).status, 400);
++});
++
++test("a cursor that this API did not hand out is a 400, not a silent first page", async () => {
++  for (const cursor of [
++    "garbage!",
++    Buffer.from("not json").toString("base64url"),
++    Buffer.from(JSON.stringify({ seen: "x", id: "y" })).toString("base64url"),
++    encodeCatalogCursor({ seen: "2026-13-45T99:00:00.000000Z", id: "p1" }),
++    encodeCatalogCursor({ seen: "yesterday", id: "p1" }),
++    encodeCatalogCursor({ seen: "2026-10-01T12:00:00.000000Z", id: "" }),
++  ]) {
++    const response = await get(`?cursor=${encodeURIComponent(cursor)}`);
++    assert.equal(response.status, 400, cursor);
++  }
++  assert.equal((await get(`?cursor=${"a".repeat(201)}`)).status, 400);
++  assert.equal((await get("?page=2")).status, 400);
++});
++
++test("merchant keeps one enabled store's products, matching its subdomains but not look-alikes", async () => {
++  const allowed = await page("?merchant=allowed&limit=50");
++  assert.equal(allowed.items.length, 8);
++  assert.ok(
++    allowed.items.every((item) => host(item.url) === "www.allowed.shop"),
++  );
++  const other = await page("?merchant=other");
++  assert.equal(other.items.length, 4);
++  for (const merchant of ["quiet", "blocked", "unknown"])
++    assert.deepEqual(await page(`?merchant=${merchant}`), {
++      items: [],
++      nextCursor: null,
++    });
++  assert.equal((await get("?merchant=bad%20id")).status, 400);
++});
+diff --git a/apps/mobile/src/ShoppingScreen.tsx b/apps/mobile/src/ShoppingScreen.tsx
+index 9013dad..3e18299 100644
+--- a/apps/mobile/src/ShoppingScreen.tsx
++++ b/apps/mobile/src/ShoppingScreen.tsx
+@@ -9,7 +9,12 @@ import {
+   useWindowDimensions,
+ } from "react-native";
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+-import Animated from "react-native-reanimated";
++import Animated, {
++  useAnimatedScrollHandler,
++  useComposedEventHandler,
++  useSharedValue,
++} from "react-native-reanimated";
++import { scheduleOnRN } from "react-native-worklets";
+ import * as Haptics from "expo-haptics";
+ import {
+   Brand,
+@@ -55,6 +60,8 @@ import { useProducts } from "./use-products";
+ import { useLocalState } from "./use-local-state";
+ import { navigationItems } from "./navigation/navigation-items";
+ import { BrowseScreen } from "./browse/BrowseScreen";
++import { nearEnd } from "./browse/catalog-feed";
++import { useCatalogFeed } from "./browse/use-catalog-feed";
+ import {
+   openTabs,
+   recentlyViewed,
+@@ -178,9 +185,12 @@ export function ShoppingScreen() {
+   // Pull-to-refresh reloads what the page shows: the store catalog, the server cart, or the history.
+   const cartRefresh = useMinimumRefresh(reloadCart);
+   const historyRefresh = useMinimumRefresh(reloadHistory);
++  // Browse's Products: the shared catalog, a page at a time.
++  const catalogFeed = useCatalogFeed();
+   const reloadBrowse = useCallback(
+-    () => Promise.all([merchants.reload(), reloadHistory()]),
+-    [merchants.reload, reloadHistory],
++    () =>
++      Promise.all([merchants.reload(), reloadHistory(), catalogFeed.reload()]),
++    [merchants.reload, reloadHistory, catalogFeed.reload],
+   );
+   const browseRefresh = useMinimumRefresh(reloadBrowse);
+   // Lists are their own feature, kept on the server per device.
+@@ -206,6 +216,34 @@ export function ShoppingScreen() {
+   useEffect(() => {
+     scroll.current?.scrollTo({ y: 0, animated: false });
+   }, [page]);
++  // Near the end of Browse, the next page of products loads (at most every 250 ms while scrolling there).
++  const browsing = useRef(page === "browse");
++  browsing.current = page === "browse";
++  const { more: moreProducts } = catalogFeed;
++  const loadMoreProducts = useCallback(() => {
++    if (browsing.current) moreProducts();
++  }, [moreProducts]);
++  const askedAt = useSharedValue(0);
++  const nearEndScroll = useAnimatedScrollHandler(
++    {
++      onScroll: (event) => {
++        if (
++          !nearEnd({
++            offset: event.contentOffset.y,
++            viewport: event.layoutMeasurement.height,
++            content: event.contentSize.height,
++          })
++        )
++          return;
++        const now = Date.now();
++        if (now - askedAt.get() < 250) return;
++        askedAt.set(now);
++        scheduleOnRN(loadMoreProducts);
++      },
++    },
++    [loadMoreProducts],
++  );
++  const onScroll = useComposedEventHandler([tabBar.onScroll, nearEndScroll]);
+   // Cart edit mode: the selected products, or null when not editing. Leaving the Cart page ends it.
+   const [cartEditing, setCartEditing] = useState<ReadonlySet<string> | null>(
+     null,
+@@ -382,7 +420,7 @@ export function ShoppingScreen() {
+         <View style={s.body}>
+           <Animated.ScrollView
+             ref={scroll}
+-            onScroll={tabBar.onScroll}
++            onScroll={onScroll}
+             scrollEventThrottle={16}
+             keyboardShouldPersistTaps="handled"
+             keyboardDismissMode="on-drag"
+@@ -414,6 +452,7 @@ export function ShoppingScreen() {
+                   openStore={openBrowser}
+                   tabs={tabs}
+                   recentlyViewed={shelf}
++                  products={catalogFeed}
+                   openProduct={setDetail}
+                   openHistory={openHistory}
+                   firstRun={firstRun}
+diff --git a/apps/mobile/src/browse/HomeSections.tsx b/apps/mobile/src/browse/HomeSections.tsx
+index 9a7ecac..95b525b 100644
+--- a/apps/mobile/src/browse/HomeSections.tsx
++++ b/apps/mobile/src/browse/HomeSections.tsx
+@@ -1,8 +1,11 @@
+ import { useState, type ComponentType, type ReactNode } from "react";
+-import { ScrollView, StyleSheet, View } from "react-native";
++import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
+ import { ChevronRight, X } from "lucide-react-native";
+ import {
++  Button,
++  Chip,
+   Copy,
++  Masonry,
+   MoryAvatar,
+   Pressable,
+   SearchField,
+@@ -15,8 +18,9 @@ import {
+   type BrowserTarget,
+ } from "../merchants/MerchantPicker";
+ import type { MobileProduct } from "../products-api";
+-import { Product } from "../cart/Product";
+-import { storeTiles } from "./home-state";
++import { Product, productCardHeight } from "../cart/Product";
++import { storeLabel, storeTiles } from "./home-state";
++import { feedVisible, type CatalogFeed } from "./catalog-feed";
+ 
+ /** Everything a Browse section may read; each section picks what it needs. */
+ export type HomeContext = {
+@@ -31,6 +35,13 @@ export type HomeContext = {
+   recentlyViewed: readonly MobileProduct[];
+   openProduct: (product: MobileProduct) => void;
+   openHistory: () => void;
++  /** The shared catalog, a page at a time; the screen's scroll calls `more` near the end (see nearEnd). */
++  products: {
++    feed: CatalogFeed;
++    more: () => void;
++    retry: () => void;
++    filter: (merchant: string | null) => void;
++  };
+   /** No product yet and the intro not dismissed. */
+   firstRun: boolean;
+   dismissIntro: () => void;
+@@ -176,6 +187,85 @@ function RecentlyViewedSection({
+   );
+ }
+ 
++/**
++ * Products seen at the stores, across every shopper and newest first, as a masonry of the same cards as the cart.
++ * More load as the screen scrolls near the end; chips keep one store's.
++ */
++function ProductsSection({
++  products: { feed, retry, filter },
++  catalog,
++  openProduct,
++  width,
++}: HomeContext) {
++  const stores = catalog?.merchants ?? [];
++  const first = feed.items.length === 0;
++  return (
++    <View style={s.section}>
++      <SectionHeader>Products</SectionHeader>
++      {stores.length > 1 ? (
++        <ScrollView
++          horizontal
++          showsHorizontalScrollIndicator={false}
++          contentContainerStyle={s.chips}
++          style={s.shelfScroll}
++        >
++          <Chip
++            label="All"
++            selected={!feed.merchant}
++            onPress={() => filter(null)}
++          />
++          {stores.map((store) => (
++            <Chip
++              key={store.id}
++              label={storeLabel(store.name)}
++              selected={feed.merchant === store.id}
++              onPress={() => filter(store.id)}
++            />
++          ))}
++        </ScrollView>
++      ) : null}
++      <Masonry
++        items={feed.items}
++        width={width}
++        columns={width > 650 ? 3 : 2}
++        gap={10}
++        keyExtractor={(p) => p.url}
++        getItemHeight={(_, w) => productCardHeight(w)}
++        renderItem={(product, w) => (
++          <Product
++            product={product}
++            width={w}
++            onPress={() => openProduct(product)}
++          />
++        )}
++      />
++      <View style={[s.footer, first && s.footerFirst]}>
++        {feed.status === "loading" ? (
++          <ActivityIndicator
++            color={colors.accent}
++            accessibilityLabel={
++              first ? "Loading products" : "Loading more products"
++            }
++          />
++        ) : feed.status === "error" ? (
++          <>
++            <Copy accessibilityRole="alert" tone="muted" style={s.footerText}>
++              {feed.error}
++            </Copy>
++            <Button secondary onPress={retry}>
++              Try again
++            </Button>
++          </>
++        ) : first ? (
++          <Copy tone="muted" style={s.footerText}>
++            No products from this store yet.
++          </Copy>
++        ) : null}
++      </View>
++    </View>
++  );
++}
++
+ /** Waits for its backend; never rendered (`planned` sections are filtered out). */
+ const Planned = () => null;
+ 
+@@ -192,6 +282,11 @@ export const HOME_SECTIONS: readonly HomeSection[] = [
+     visible: (c) => c.recentlyViewed.length > 0,
+     Section: RecentlyViewedSection,
+   },
++  {
++    key: "products",
++    visible: (c) => feedVisible(c.products.feed),
++    Section: ProductsSection,
++  },
+   {
+     key: "price-drops",
+     planned: "GET /catalog/drops (catalog-wide; ?merchant= for your stores)",
+@@ -253,4 +348,8 @@ const s = StyleSheet.create({
+   shelf: { gap: 10, paddingHorizontal: 16 },
+   sectionTitle: { fontSize: 18, lineHeight: 24 },
+   caption: { fontSize: 13, lineHeight: 18 },
++  chips: { gap: 8, paddingHorizontal: 16 },
++  footer: { alignItems: "center", gap: 10, minHeight: 36 },
++  footerFirst: { paddingVertical: 24 },
++  footerText: { textAlign: "center" },
+ });
+diff --git a/apps/mobile/src/browse/catalog-api.ts b/apps/mobile/src/browse/catalog-api.ts
+new file mode 100644
+index 0000000..f901fa4
+--- /dev/null
++++ b/apps/mobile/src/browse/catalog-api.ts
+@@ -0,0 +1,45 @@
++import { apiFailure } from "../errors";
++import { baseUrl } from "../api-base";
++import { productEntry } from "../product-data";
++import type { MobileProduct } from "../products-api";
++
++/** One page of the shared catalog (GET /catalog/products): pass `nextCursor` back as `cursor`; null is the end. */
++export type CatalogPage = { items: MobileProduct[]; nextCursor: string | null };
++
++/** The catalog is the same for everyone, so it needs no device token (like the store list). */
++export async function getCatalogPage({
++  cursor,
++  merchant,
++  limit,
++  signal,
++}: {
++  cursor?: string | null;
++  merchant?: string | null;
++  limit?: number;
++  signal?: AbortSignal;
++}): Promise<CatalogPage> {
++  const query = new URLSearchParams();
++  if (cursor) query.set("cursor", cursor);
++  if (merchant) query.set("merchant", merchant);
++  if (limit) query.set("limit", String(limit));
++  const search = query.size ? `?${query}` : "";
++  const response = await fetch(`${baseUrl}/catalog/products${search}`, {
++    signal,
++  });
++  if (!response.ok)
++    throw await apiFailure(
++      response,
++      "Could not load products. Please try again.",
++    );
++  const body = (await response.json()) as {
++    items?: { product?: unknown; history?: unknown }[];
++    nextCursor?: unknown;
++  };
++  return {
++    items: (body.items ?? []).flatMap((item) => {
++      const product = productEntry(item);
++      return product ? [product] : [];
++    }),
++    nextCursor: typeof body.nextCursor === "string" ? body.nextCursor : null,
++  };
++}
+diff --git a/apps/mobile/src/browse/catalog-feed.ts b/apps/mobile/src/browse/catalog-feed.ts
+new file mode 100644
+index 0000000..b8ec66b
+--- /dev/null
++++ b/apps/mobile/src/browse/catalog-feed.ts
+@@ -0,0 +1,73 @@
++import type { MobileProduct } from "../products-api";
++import type { CatalogPage } from "./catalog-api";
++
++/**
++ * The Products section's paging state. `loading` covers both the first page and the next one (items tell them
++ * apart); `done` means the server said there is no next page.
++ */
++export type CatalogFeed = {
++  merchant: string | null;
++  items: readonly MobileProduct[];
++  cursor: string | null;
++  status: "loading" | "idle" | "error" | "done";
++  error: string;
++};
++
++export const startFeed = (merchant: string | null = null): CatalogFeed => ({
++  merchant,
++  items: [],
++  cursor: null,
++  status: "loading",
++  error: "",
++});
++
++/** Whether the shopper reaching the end should fetch another page. */
++export const canLoadMore = (feed: CatalogFeed) => feed.status === "idle";
++
++/**
++ * A page arrived: append it. A product already shown (it moved up between two pages because it was observed
++ * again) is not shown twice.
++ */
++export function appendPage(feed: CatalogFeed, page: CatalogPage): CatalogFeed {
++  const seen = new Set(feed.items.map((item) => item.url));
++  return {
++    ...feed,
++    items: [...feed.items, ...page.items.filter((item) => !seen.has(item.url))],
++    cursor: page.nextCursor,
++    status: page.nextCursor ? "idle" : "done",
++    error: "",
++  };
++}
++
++export const failPage = (feed: CatalogFeed, error: string): CatalogFeed => ({
++  ...feed,
++  status: "error",
++  error,
++});
++
++/** Retrying fetches the page that failed again; what is shown stays. */
++export const retryPage = (feed: CatalogFeed): CatalogFeed =>
++  feed.status === "error" ? { ...feed, status: "loading", error: "" } : feed;
++
++export const loadingNext = (feed: CatalogFeed): CatalogFeed =>
++  canLoadMore(feed) ? { ...feed, status: "loading" } : feed;
++
++/** The section hides only when the catalog (or the chosen store's part of it) is known to be empty. */
++export const feedVisible = (feed: CatalogFeed) =>
++  !(feed.status === "done" && feed.items.length === 0 && !feed.merchant);
++
++/** Pixels from the bottom at which the next page starts loading, about two rows of cards ahead. */
++export const NEAR_END = 600;
++
++/** Whether a scroll position is close enough to the end of the content to fetch the next page. */
++export function nearEnd(
++  {
++    offset,
++    viewport,
++    content,
++  }: { offset: number; viewport: number; content: number },
++  threshold = NEAR_END,
++) {
++  "worklet";
++  return content > 0 && offset + viewport >= content - threshold;
++}
+diff --git a/apps/mobile/src/browse/use-catalog-feed.ts b/apps/mobile/src/browse/use-catalog-feed.ts
+new file mode 100644
+index 0000000..940a305
+--- /dev/null
++++ b/apps/mobile/src/browse/use-catalog-feed.ts
+@@ -0,0 +1,80 @@
++import { useCallback, useEffect, useRef, useState } from "react";
++import { userMessage } from "../errors";
++import { getCatalogPage } from "./catalog-api";
++import {
++  appendPage,
++  canLoadMore,
++  failPage,
++  loadingNext,
++  retryPage,
++  startFeed,
++  type CatalogFeed,
++} from "./catalog-feed";
++
++/**
++ * The Products section's pages: the first loads on mount, `more` fetches the next one (ignored while one is
++ * loading or after the last), `filter` restarts at one store, `reload` restarts for pull-to-refresh.
++ */
++export function useCatalogFeed() {
++  const [feed, setFeed] = useState<CatalogFeed>(() => startFeed());
++  // The latest state for callbacks, and the request in flight (a new start aborts it).
++  const current = useRef(feed);
++  current.current = feed;
++  const inFlight = useRef<AbortController | null>(null);
++  const fetchPage = useCallback(async (from: CatalogFeed) => {
++    inFlight.current?.abort();
++    const abort = new AbortController();
++    inFlight.current = abort;
++    try {
++      const page = await getCatalogPage({
++        cursor: from.cursor,
++        merchant: from.merchant,
++        signal: abort.signal,
++      });
++      if (!abort.signal.aborted) setFeed(appendPage(from, page));
++    } catch (error) {
++      if (!abort.signal.aborted)
++        setFeed(
++          failPage(
++            from,
++            userMessage(error, "Could not load products. Please try again."),
++          ),
++        );
++    } finally {
++      if (inFlight.current === abort) inFlight.current = null;
++    }
++  }, []);
++  const start = useCallback(
++    (merchant: string | null) => {
++      const next = startFeed(merchant);
++      setFeed(next);
++      return fetchPage(next);
++    },
++    [fetchPage],
++  );
++  useEffect(() => {
++    void start(null);
++    return () => inFlight.current?.abort();
++  }, [start]);
++  const more = useCallback(() => {
++    const feed = current.current;
++    if (!canLoadMore(feed) || inFlight.current) return;
++    const next = loadingNext(feed);
++    setFeed(next);
++    void fetchPage(next);
++  }, [fetchPage]);
++  const retry = useCallback(() => {
++    const next = retryPage(current.current);
++    if (next === current.current) return;
++    setFeed(next);
++    void fetchPage(next);
++  }, [fetchPage]);
++  const filter = useCallback(
++    (merchant: string | null) => {
++      if (merchant !== current.current.merchant) void start(merchant);
++    },
++    [start],
++  );
++  const reload = useCallback(() => start(current.current.merchant), [start]);
++  return { feed, more, retry, filter, reload };
++}
+diff --git a/apps/mobile/test/catalog-feed.test.ts b/apps/mobile/test/catalog-feed.test.ts
+new file mode 100644
+index 0000000..bff5ad2
+--- /dev/null
++++ b/apps/mobile/test/catalog-feed.test.ts
+@@ -0,0 +1,99 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import type { MobileProduct } from "../src/products-api";
++import {
++  appendPage,
++  canLoadMore,
++  failPage,
++  feedVisible,
++  loadingNext,
++  nearEnd,
++  retryPage,
++  startFeed,
++} from "../src/browse/catalog-feed";
++
++const product = (n: number): MobileProduct => ({
++  url: `https://www.bestbuy.ca/p/${n}`,
++  title: `Product ${n}`,
++  images: [],
++  offers: [{ amountMinor: 1000 + n, currency: "CAD" }],
++  history: [],
++});
++
++test("pages append in order until the server has no next cursor", () => {
++  let feed = startFeed();
++  assert.equal(feed.status, "loading");
++  assert.equal(canLoadMore(feed), false);
++  feed = appendPage(feed, {
++    items: [product(1), product(2)],
++    nextCursor: "c1",
++  });
++  assert.equal(feed.status, "idle");
++  assert.equal(canLoadMore(feed), true);
++  feed = loadingNext(feed);
++  assert.equal(feed.status, "loading");
++  // Asking again while a page loads changes nothing.
++  assert.equal(loadingNext(feed), feed);
++  feed = appendPage(feed, { items: [product(3)], nextCursor: null });
++  assert.deepEqual(
++    feed.items.map((p) => p.title),
++    ["Product 1", "Product 2", "Product 3"],
++  );
++  assert.equal(feed.status, "done");
++  assert.equal(canLoadMore(feed), false);
++  assert.equal(loadingNext(feed), feed);
++});
++
++test("a product that moved up between two pages is not shown twice", () => {
++  const feed = appendPage(
++    appendPage(startFeed(), {
++      items: [product(1), product(2)],
++      nextCursor: "c",
++    }),
++    { items: [product(2), product(3)], nextCursor: "d" },
++  );
++  assert.deepEqual(
++    feed.items.map((p) => p.url),
++    [product(1), product(2), product(3)].map((p) => p.url),
++  );
++  assert.equal(feed.cursor, "d");
++});
++
++test("a failed page keeps what is shown and retries the same cursor", () => {
++  const shown = appendPage(startFeed(), {
++    items: [product(1)],
++    nextCursor: "c1",
++  });
++  const failed = failPage(loadingNext(shown), "Could not load products.");
++  assert.equal(failed.status, "error");
++  assert.equal(failed.items.length, 1);
++  assert.equal(canLoadMore(failed), false);
++  const retrying = retryPage(failed);
++  assert.equal(retrying.status, "loading");
++  assert.equal(retrying.cursor, "c1");
++  assert.equal(retrying.error, "");
++  assert.equal(retryPage(shown), shown);
++});
++
++test("the section hides only for a known-empty catalog, not while loading, failing or filtered", () => {
++  assert.equal(feedVisible(startFeed()), true);
++  assert.equal(feedVisible(failPage(startFeed(), "x")), true);
++  assert.equal(
++    feedVisible(appendPage(startFeed(), { items: [], nextCursor: null })),
++    false,
++  );
++  // A store with nothing yet keeps the section (and its chips) so the shopper can switch back.
++  assert.equal(
++    feedVisible(
++      appendPage(startFeed("bestbuy-ca"), { items: [], nextCursor: null }),
++    ),
++    true,
++  );
++});
++
++test("the next page starts loading within about two rows of the end", () => {
++  assert.equal(nearEnd({ offset: 0, viewport: 800, content: 4000 }), false);
++  assert.equal(nearEnd({ offset: 2600, viewport: 800, content: 4000 }), true);
++  assert.equal(nearEnd({ offset: 3200, viewport: 800, content: 4000 }), true);
++  assert.equal(nearEnd({ offset: 0, viewport: 800, content: 0 }), false);
++});
+diff --git a/apps/worker/prisma/migrations/20261012000000_catalog_order_index/migration.sql b/apps/worker/prisma/migrations/20261012000000_catalog_order_index/migration.sql
+new file mode 100644
+index 0000000..0a620f3
+--- /dev/null
++++ b/apps/worker/prisma/migrations/20261012000000_catalog_order_index/migration.sql
+@@ -0,0 +1,2 @@
++-- The API's browsable catalog pages through products newest observed first, with the id as tiebreak.
++CREATE INDEX "tracked_products_catalog_idx" ON "tracked_products"("last_observed_at" DESC, "id" DESC);
+diff --git a/apps/worker/prisma/schema.prisma b/apps/worker/prisma/schema.prisma
+index 5b4b54e..64fc71c 100644
+--- a/apps/worker/prisma/schema.prisma
++++ b/apps/worker/prisma/schema.prisma
+@@ -58,6 +58,7 @@ model TrackedProduct {
+   externalPrices ExternalPricePoint[]
+   historySyncs   ExternalHistorySync[]
+ 
++  @@index([lastObservedAt(sort: Desc), id(sort: Desc)], map: "tracked_products_catalog_idx")
+   @@map("tracked_products")
+ }
+ 
+diff --git a/apps/worker/src/generated/prisma/internal/class.ts b/apps/worker/src/generated/prisma/internal/class.ts
+index 44cf8fc..dc288ab 100644
+--- a/apps/worker/src/generated/prisma/internal/class.ts
++++ b/apps/worker/src/generated/prisma/internal/class.ts
+@@ -20,7 +20,7 @@ const config: runtime.GetPrismaClientConfig = {
+   "clientVersion": "7.10.0",
+   "engineVersion": "0edf323efd1d98336f3f0a68684b56f689b900d3",
+   "activeProvider": "postgresql",
+-  "inlineSchema": "generator client {\n  provider               = \"prisma-client\"\n  output                 = \"../src/generated/prisma\"\n  moduleFormat           = \"esm\"\n  generatedFileExtension = \"ts\"\n  importFileExtension    = \"ts\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n}\n\nmodel CaptureRun {\n  id              String               @id\n  requestedUrl    String               @map(\"requested_url\")\n  source          String\n  acquisition     String\n  status          String\n  createdAt       DateTime             @default(now()) @map(\"created_at\") @db.Timestamptz(6)\n  completedAt     DateTime?            @map(\"completed_at\") @db.Timestamptz(6)\n  contextSha256   String?              @map(\"context_sha256\")\n  activeAttemptId String?              @map(\"active_attempt_id\")\n  leaseExpiresAt  DateTime?            @map(\"lease_expires_at\") @db.Timestamptz(6)\n  attempts        CaptureAttempt[]\n  observations    ProductObservation[]\n\n  // The API answers revisited pages from the product last captured from them.\n  @@index([requestedUrl], map: \"crawler_runs_requested_url_idx\")\n  @@map(\"crawler_runs\")\n}\n\nmodel CaptureAttempt {\n  id            String               @id\n  taskId        String               @map(\"run_id\")\n  auditId       String               @map(\"audit_id\")\n  status        String\n  finalUrl      String?              @map(\"final_url\")\n  parserVersion String?              @map(\"parser_version\")\n  startedAt     DateTime             @default(now()) @map(\"started_at\") @db.Timestamptz(6)\n  completedAt   DateTime?            @map(\"completed_at\") @db.Timestamptz(6)\n  error         String?\n  run           CaptureRun           @relation(fields: [taskId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  observations  ProductObservation[]\n\n  @@index([taskId], map: \"crawler_attempts_run_idx\")\n  @@map(\"crawler_attempts\")\n}\n\nmodel TrackedProduct {\n  id             String                @id\n  url            String\n  identityKey    String                @unique(map: \"tracked_products_identity_key\") @map(\"identity_key\")\n  sku            String?\n  title          String\n  data           Json\n  lastObservedAt DateTime              @map(\"last_observed_at\") @db.Timestamptz(6)\n  observations   ProductObservation[]\n  externalPrices ExternalPricePoint[]\n  historySyncs   ExternalHistorySync[]\n\n  @@map(\"tracked_products\")\n}\n\nmodel ProductObservation {\n  id         BigInt             @id @default(autoincrement())\n  taskId     String             @map(\"run_id\")\n  attemptId  String             @map(\"attempt_id\")\n  productId  String             @map(\"product_id\")\n  observedAt DateTime           @map(\"observed_at\") @db.Timestamptz(6)\n  data       Json\n  run        CaptureRun         @relation(fields: [taskId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  attempt    CaptureAttempt     @relation(fields: [attemptId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  product    TrackedProduct     @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  prices     PriceObservation[]\n\n  @@index([taskId, productId], map: \"product_observations_run_product_idx\")\n  @@index([productId, observedAt(sort: Desc)], map: \"observations_history_idx\")\n  @@map(\"product_observations\")\n}\n\nmodel PriceObservation {\n  observationId        BigInt             @map(\"observation_id\")\n  offerIndex           Int                @map(\"offer_index\")\n  amountMinor          BigInt             @map(\"amount_minor\")\n  compareAtAmountMinor BigInt?            @map(\"compare_at_amount_minor\")\n  compareAtEvidence    String?            @map(\"compare_at_evidence\")\n  currencyEvidence     String             @map(\"currency_evidence\")\n  currency             String             @db.Char(3)\n  availability         String?\n  offerUrl             String?            @map(\"offer_url\")\n  evidence             String\n  observation          ProductObservation @relation(fields: [observationId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n\n  @@id([observationId, offerIndex])\n  @@map(\"price_observations\")\n}\n\n/// Price history from a third-party source (e.g. Keepa), kept apart from captured, evidence-backed observations.\nmodel ExternalPricePoint {\n  productId     String         @map(\"product_id\")\n  source        String\n  series        String\n  observedAt    DateTime       @map(\"observed_at\") @db.Timestamptz(6)\n  /// Null when the series had no price (e.g. no Buy Box / out of stock).\n  amountMinor   BigInt?        @map(\"amount_minor\")\n  shippingMinor BigInt?        @map(\"shipping_minor\")\n  currency      String         @db.Char(3)\n  product       TrackedProduct @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n\n  @@id([productId, source, series, observedAt])\n  @@map(\"external_price_points\")\n}\n\n/// When each product's external history was last fetched, for scheduling and diagnosis.\nmodel ExternalHistorySync {\n  productId    String         @map(\"product_id\")\n  source       String\n  lastSyncedAt DateTime       @map(\"last_synced_at\") @db.Timestamptz(6)\n  lastError    String?        @map(\"last_error\")\n  product      TrackedProduct @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n\n  @@id([productId, source])\n  @@index([source, lastSyncedAt])\n  @@map(\"external_history_syncs\")\n}\n",
++  "inlineSchema": "generator client {\n  provider               = \"prisma-client\"\n  output                 = \"../src/generated/prisma\"\n  moduleFormat           = \"esm\"\n  generatedFileExtension = \"ts\"\n  importFileExtension    = \"ts\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n}\n\nmodel CaptureRun {\n  id              String               @id\n  requestedUrl    String               @map(\"requested_url\")\n  source          String\n  acquisition     String\n  status          String\n  createdAt       DateTime             @default(now()) @map(\"created_at\") @db.Timestamptz(6)\n  completedAt     DateTime?            @map(\"completed_at\") @db.Timestamptz(6)\n  contextSha256   String?              @map(\"context_sha256\")\n  activeAttemptId String?              @map(\"active_attempt_id\")\n  leaseExpiresAt  DateTime?            @map(\"lease_expires_at\") @db.Timestamptz(6)\n  attempts        CaptureAttempt[]\n  observations    ProductObservation[]\n\n  // The API answers revisited pages from the product last captured from them.\n  @@index([requestedUrl], map: \"crawler_runs_requested_url_idx\")\n  @@map(\"crawler_runs\")\n}\n\nmodel CaptureAttempt {\n  id            String               @id\n  taskId        String               @map(\"run_id\")\n  auditId       String               @map(\"audit_id\")\n  status        String\n  finalUrl      String?              @map(\"final_url\")\n  parserVersion String?              @map(\"parser_version\")\n  startedAt     DateTime             @default(now()) @map(\"started_at\") @db.Timestamptz(6)\n  completedAt   DateTime?            @map(\"completed_at\") @db.Timestamptz(6)\n  error         String?\n  run           CaptureRun           @relation(fields: [taskId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  observations  ProductObservation[]\n\n  @@index([taskId], map: \"crawler_attempts_run_idx\")\n  @@map(\"crawler_attempts\")\n}\n\nmodel TrackedProduct {\n  id             String                @id\n  url            String\n  identityKey    String                @unique(map: \"tracked_products_identity_key\") @map(\"identity_key\")\n  sku            String?\n  title          String\n  data           Json\n  lastObservedAt DateTime              @map(\"last_observed_at\") @db.Timestamptz(6)\n  observations   ProductObservation[]\n  externalPrices ExternalPricePoint[]\n  historySyncs   ExternalHistorySync[]\n\n  @@index([lastObservedAt(sort: Desc), id(sort: Desc)], map: \"tracked_products_catalog_idx\")\n  @@map(\"tracked_products\")\n}\n\nmodel ProductObservation {\n  id         BigInt             @id @default(autoincrement())\n  taskId     String             @map(\"run_id\")\n  attemptId  String             @map(\"attempt_id\")\n  productId  String             @map(\"product_id\")\n  observedAt DateTime           @map(\"observed_at\") @db.Timestamptz(6)\n  data       Json\n  run        CaptureRun         @relation(fields: [taskId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  attempt    CaptureAttempt     @relation(fields: [attemptId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  product    TrackedProduct     @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n  prices     PriceObservation[]\n\n  @@index([taskId, productId], map: \"product_observations_run_product_idx\")\n  @@index([productId, observedAt(sort: Desc)], map: \"observations_history_idx\")\n  @@map(\"product_observations\")\n}\n\nmodel PriceObservation {\n  observationId        BigInt             @map(\"observation_id\")\n  offerIndex           Int                @map(\"offer_index\")\n  amountMinor          BigInt             @map(\"amount_minor\")\n  compareAtAmountMinor BigInt?            @map(\"compare_at_amount_minor\")\n  compareAtEvidence    String?            @map(\"compare_at_evidence\")\n  currencyEvidence     String             @map(\"currency_evidence\")\n  currency             String             @db.Char(3)\n  availability         String?\n  offerUrl             String?            @map(\"offer_url\")\n  evidence             String\n  observation          ProductObservation @relation(fields: [observationId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n\n  @@id([observationId, offerIndex])\n  @@map(\"price_observations\")\n}\n\n/// Price history from a third-party source (e.g. Keepa), kept apart from captured, evidence-backed observations.\nmodel ExternalPricePoint {\n  productId     String         @map(\"product_id\")\n  source        String\n  series        String\n  observedAt    DateTime       @map(\"observed_at\") @db.Timestamptz(6)\n  /// Null when the series had no price (e.g. no Buy Box / out of stock).\n  amountMinor   BigInt?        @map(\"amount_minor\")\n  shippingMinor BigInt?        @map(\"shipping_minor\")\n  currency      String         @db.Char(3)\n  product       TrackedProduct @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n\n  @@id([productId, source, series, observedAt])\n  @@map(\"external_price_points\")\n}\n\n/// When each product's external history was last fetched, for scheduling and diagnosis.\nmodel ExternalHistorySync {\n  productId    String         @map(\"product_id\")\n  source       String\n  lastSyncedAt DateTime       @map(\"last_synced_at\") @db.Timestamptz(6)\n  lastError    String?        @map(\"last_error\")\n  product      TrackedProduct @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)\n\n  @@id([productId, source])\n  @@index([source, lastSyncedAt])\n  @@map(\"external_history_syncs\")\n}\n",
+   "runtimeDataModel": {
+     "models": {},
+     "enums": {},

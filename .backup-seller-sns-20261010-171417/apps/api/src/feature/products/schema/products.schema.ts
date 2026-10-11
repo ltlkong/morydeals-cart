@@ -1,0 +1,287 @@
+import { z } from "zod";
+import { PricePointSchema } from "../../catalog/schema/price-point.schema.ts";
+import { CrawlTaskSchema } from "@morydeals/capture-contracts";
+
+export const CreateProductSchema = z
+  .object({ url: z.string().trim().pipe(CrawlTaskSchema.shape.url) })
+  .strict();
+export const RequestIdSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
+/** schema.org ItemAvailability names (as the worker stores them) → the app's availability. */
+const AVAILABILITY = {
+  InStock: "in_stock",
+  OutOfStock: "out_of_stock",
+  SoldOut: "out_of_stock",
+  PreOrder: "preorder",
+  PreSale: "preorder",
+  BackOrder: "backorder",
+  LimitedAvailability: "limited",
+  Discontinued: "discontinued",
+} as const;
+export const AvailabilitySchema = z.enum([
+  "in_stock",
+  "out_of_stock",
+  "preorder",
+  "backorder",
+  "limited",
+  "discontinued",
+]);
+/** The item's stated condition; renewed covers refurbished, open_box is new but opened. */
+export const ConditionSchema = z.enum([
+  "new",
+  "used",
+  "renewed",
+  "open_box",
+  "damaged",
+]);
+/** A deal shown beside the price (morydeals-price `promotions[]` vocabulary, plus `deal` for limited-time deals). */
+export const PromotionSchema = z.object({
+  type: z.enum(["sale", "coupon", "member", "multi_buy", "deal", "other"]),
+  text: z.string().min(1).max(200),
+  code: z.string().optional(),
+  /** A price the store itself states for this deal; never computed. */
+  effectiveMinor: z.number().int().positive().safe().optional(),
+  /** When the deal ends (UTC); never guessed. */
+  validUntil: z.iso.datetime().optional(),
+  /** The end was computed from the page's countdown plus the capture time (the offer's `observedAt`). */
+  validUntilEstimated: z.boolean().optional().catch(undefined),
+  /** The time-limited deal the store names. */
+  kind: z
+    .enum(["lightning", "deal_of_the_day", "limited_time"])
+    .optional()
+    .catch(undefined),
+  /** A Lightning Deal's share claimed, as the page states it. */
+  claimedPercent: z.number().min(0).max(100).optional().catch(undefined),
+});
+/** One stored offer as the worker keeps it. */
+const StoredOfferSchema = z.object({
+  amountMinor: z.number().int().positive().safe(),
+  compareAtAmountMinor: z.number().int().positive().safe().optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  /** schema.org ItemAvailability name, as stored. */
+  availability: z.string().optional(),
+  condition: ConditionSchema.optional().catch(undefined),
+  promotions: z.array(PromotionSchema).optional().catch(undefined),
+  seller: z.string().optional(),
+});
+/** Product-level facts: what the item is, whoever sells it. */
+const ProductFieldsSchema = z.object({
+  url: CrawlTaskSchema.shape.url,
+  title: z.string().min(1),
+  images: z.array(z.string().url()),
+  brand: z.string().optional(),
+  /** The selected variant, when the store names one ("Black · 256GB"). */
+  variant: z
+    .object({
+      id: z.string().optional(),
+      label: z.string().min(1),
+      options: z.array(z.object({ name: z.string(), value: z.string() })),
+    })
+    .optional()
+    .catch(undefined),
+  /** The product's published rating and review count. */
+  rating: z
+    .object({
+      value: z.number().nonnegative(),
+      scale: z.number().positive(),
+      count: z.number().int().positive().optional(),
+    })
+    .refine((r) => r.value <= r.scale)
+    .optional()
+    .catch(undefined),
+  /** When this product was last captured: the capture time of the offers shown (absent on a fresh parse). */
+  observedAt: z.iso.datetime().optional(),
+});
+/**
+ * The product as the worker stores it (internal evidence is stripped): every offer the page showed, each with
+ * its condition; the first is the primary (new when the page has a new offer).
+ */
+export const ProductDataSchema = ProductFieldsSchema.extend({
+  offers: z.array(StoredOfferSchema).min(1),
+});
+type ProductData = z.infer<typeof ProductDataSchema>;
+type StoredOffer = z.infer<typeof StoredOfferSchema>;
+type PricePoint = z.infer<typeof PricePointSchema>;
+type Condition = z.infer<typeof ConditionSchema>;
+/** The condition a price series is kept under: an offer that states none is read with new. */
+export const conditionKey = (condition: string | null | undefined) =>
+  condition ?? "new";
+/** An offer's identity across captures: its condition and its seller. */
+export const offerKey = (
+  condition: string | null | undefined,
+  seller: string | null | undefined,
+) => `${conditionKey(condition)}\n${seller ?? ""}`;
+const stockOf = (offer: StoredOffer) => {
+  const stock = offer.availability?.replace(/^https?:\/\/schema\.org\//, "");
+  return (
+    (stock &&
+      (AVAILABILITY as Record<string, z.infer<typeof AvailabilitySchema>>)[
+        stock
+      ]) ||
+    null
+  );
+};
+/**
+ * One offer: one price, with its own condition, seller, stock, deals (still running), deal end and price history.
+ */
+export const ProductOfferSchema = z.object({
+  amountMinor: z.number().int().positive().safe(),
+  compareAtAmountMinor: z.number().int().positive().safe().optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  /** The stated condition; null when unstated (most stores sell new without saying so). */
+  condition: ConditionSchema.nullable(),
+  seller: z.string().optional(),
+  availability: AvailabilitySchema.nullable(),
+  /** Deals still running at response time; one past its end is never sent. */
+  deals: z.array(PromotionSchema),
+  /** When the soonest-ending running deal ends; null when no deal shows an end. */
+  dealEndsAt: z.iso.datetime().nullable(),
+  /** dealEndsAt came from the page's countdown and the capture time (`observedAt`), not from the store. */
+  dealEndsEstimated: z.boolean(),
+  /** Up to 90 days of this offer's own prices; absent when not looked up. */
+  history: z.array(PricePointSchema).optional(),
+});
+export type ProductOffer = z.infer<typeof ProductOfferSchema>;
+/** Price series for one product: per condition (the primary's) and per offer (condition and seller). */
+export type OfferHistory = {
+  byCondition: ReadonlyMap<string, PricePoint[]>;
+  byOffer: ReadonlyMap<string, PricePoint[]>;
+};
+const CONDITION_ORDER: (Condition | null)[] = [
+  "new",
+  null,
+  "open_box",
+  "renewed",
+  "used",
+  "damaged",
+];
+/**
+ * The product as the app gets it: product facts plus every offer. The first offer is the primary one (new when
+ * the store has a new offer; else the one the page features); the rest follow by condition, then price.
+ */
+export function productFacts(
+  product: ProductData,
+  { now = Date.now(), history }: { now?: number; history?: OfferHistory } = {},
+): Product {
+  const primary =
+    product.offers.find((offer) => conditionKey(offer.condition) === "new") ??
+    product.offers[0];
+  const rest = product.offers
+    .filter((offer) => offer !== primary)
+    .sort(
+      (a, b) =>
+        CONDITION_ORDER.indexOf(a.condition ?? null) -
+          CONDITION_ORDER.indexOf(b.condition ?? null) ||
+        a.amountMinor - b.amountMinor,
+    );
+  const view = (offer: StoredOffer, isPrimary: boolean): ProductOffer => {
+    const deals = (offer.promotions ?? []).filter(
+      (deal) => !deal.validUntil || Date.parse(deal.validUntil) > now,
+    );
+    const ending = deals
+      .filter((deal) => deal.validUntil)
+      .sort((a, b) => Date.parse(a.validUntil!) - Date.parse(b.validUntil!))[0];
+    const series = isPrimary
+      ? history?.byCondition.get(conditionKey(offer.condition))
+      : history?.byOffer.get(offerKey(offer.condition, offer.seller));
+    return {
+      amountMinor: offer.amountMinor,
+      ...(offer.compareAtAmountMinor
+        ? { compareAtAmountMinor: offer.compareAtAmountMinor }
+        : {}),
+      currency: offer.currency,
+      condition: offer.condition ?? null,
+      ...(offer.seller ? { seller: offer.seller } : {}),
+      availability: stockOf(offer),
+      deals,
+      dealEndsAt: ending?.validUntil ?? null,
+      dealEndsEstimated: !!ending?.validUntilEstimated,
+      ...(series ? { history: series } : {}),
+    };
+  };
+  const offers = [view(primary, true), ...rest.map((o) => view(o, false))];
+  return {
+    ...product,
+    offers,
+    availability: offers[0].availability,
+    condition: offers[0].condition,
+    deals: offers[0].deals,
+  };
+}
+/** The product as the app receives it. */
+export const ProductSchema = ProductFieldsSchema.extend({
+  /** Every offer, the primary first (see productFacts). */
+  offers: z.array(ProductOfferSchema).min(1),
+  /** @deprecated The primary offer's (offers[0]) stock; kept for older apps. */
+  availability: AvailabilitySchema.nullable(),
+  /** @deprecated The primary offer's condition; kept for older apps. */
+  condition: ConditionSchema.nullable(),
+  /** @deprecated The primary offer's running deals; kept for older apps. */
+  deals: z.array(PromotionSchema),
+});
+export type Product = z.infer<typeof ProductSchema>;
+// Parsing strips internal evidence and audit metadata at the response boundary.
+export const ParsedCaptureSchema = z.object({
+  status: z.literal("parsed"),
+  parsed: z.object({ products: z.array(ProductDataSchema).length(1) }),
+});
+export const AcceptedProductSchema = z.object({
+  id: RequestIdSchema,
+  status: z.literal("pending"),
+});
+export const ProductStatusSchema = z.discriminatedUnion("status", [
+  AcceptedProductSchema,
+  z.object({
+    id: RequestIdSchema,
+    status: z.literal("failed"),
+    message: z.string(),
+  }),
+  z.object({
+    id: RequestIdSchema,
+    status: z.literal("ready"),
+    product: ProductSchema,
+  }),
+]);
+/** A page the in-app browser is about to read, asked about before its snapshot is uploaded. */
+export const KnownPageRequestSchema = CreateProductSchema;
+/** The product recently captured from that page, or unknown (the app then uploads the page). */
+export const KnownPageSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("unknown") }),
+  z.object({
+    status: z.literal("product"),
+    product: ProductSchema,
+    history: z.array(PricePointSchema),
+  }),
+]);
+export type KnownPage = z.infer<typeof KnownPageSchema>;
+export type CreateProduct = z.infer<typeof CreateProductSchema>;
+export type ProductStatus = z.infer<typeof ProductStatusSchema>;
+/** An automatic page visit: was it a product page (by P(product)), and if so the confirmed product. */
+export const VisitStatusSchema = z.discriminatedUnion("status", [
+  AcceptedProductSchema,
+  z.object({
+    id: RequestIdSchema,
+    status: z.literal("not_product"),
+    productProbability: z.number(),
+  }),
+  z.object({
+    id: RequestIdSchema,
+    status: z.literal("product"),
+    productProbability: z.number(),
+    product: ProductSchema,
+    /** Up to 90 days of prices, as the cart and lists show them. */
+    history: z.array(PricePointSchema),
+  }),
+  z.object({
+    id: RequestIdSchema,
+    status: z.literal("unconfirmed"),
+    productProbability: z.number(),
+  }),
+  /** A product page waiting for a size, colour or configuration choice before it has a definite price. */
+  z.object({
+    id: RequestIdSchema,
+    status: z.literal("needs_selection"),
+    productProbability: z.number(),
+  }),
+  z.object({ id: RequestIdSchema, status: z.literal("failed") }),
+]);
+export type VisitStatus = z.infer<typeof VisitStatusSchema>;

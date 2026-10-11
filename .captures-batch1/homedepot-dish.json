@@ -1,0 +1,128 @@
+{
+  "taskId": "eee60284-c3ef-4bb3-b1d0-2b01f7623cdd",
+  "attemptId": "50f4c6f4-f763-4cde-885f-e6bc636ed4d2",
+  "status": "needs_review",
+  "auditId": "product-page/2026-10-11/www.homedepot.ca/fe46bb2b25465341/eee60284-c3ef-4bb3-b1d0-2b01f7623cdd--50f4c6f4-f763-4cde-885f-e6bc636ed4d2",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "needs_review",
+    "products": [],
+    "issues": [
+      "No product identified"
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:46:52.246Z",
+        "completedAt": "2026-10-11T01:46:52.277Z",
+        "durationMs": 30.588,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 58837,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 3276.162,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 55.303,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 1168.73,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 31.207,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 25.367,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 1946.223,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 35.862,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 9.844,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 4692,
+      "outputTokens": 146,
+      "requestMs": 1944.247
+    }
+  }
+}

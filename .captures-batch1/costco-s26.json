@@ -1,0 +1,144 @@
+{
+  "taskId": "6f752f2b-ec88-4d01-b1f8-eb9317abea54",
+  "attemptId": "e0cfce9d-f129-4d14-9728-4c362cff48d2",
+  "status": "needs_review",
+  "auditId": "product-page/2026-10-11/www.costco.ca/ebf170b165374ea7/6f752f2b-ec88-4d01-b1f8-eb9317abea54--e0cfce9d-f129-4d14-9728-4c362cff48d2",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "needs_review",
+    "issues": [
+      "No verified concrete price"
+    ],
+    "products": [
+      {
+        "url": "https://www.costco.ca/p/-/samsung-galaxy-s26-256gb-unlocked-smartphone/4000443602",
+        "title": "Samsung Galaxy S26+ 256GB Unlocked Smartphone",
+        "brand": "Samsung",
+        "sku": "8778006",
+        "images": [
+          "https://gdx-assets.costco.com/adobe/assets/urn:aaid:aem:3a539d65-7c71-469e-8697-f0e8277fff86/as/4000443602-894_black_1.avif?width=1024&height=1024&fit=contain",
+          "https://gdx-assets.costco.com/adobe/assets/urn:aaid:aem:baa39883-32d1-4edf-866c-ab0522d2cb4b/as/4000443602-894_black_2.avif?width=556&height=556&fit=contain",
+          "https://gdx-assets.costco.com/adobe/assets/urn:aaid:aem:215ec4cf-9a5e-4f2d-852c-f28f2c22f4ea/as/4000443602-894_black_3.avif?width=556&height=556&fit=contain",
+          "https://gdx-assets.costco.com/adobe/assets/urn:aaid:aem:7f098553-c9ed-4f55-8951-f2a693806d25/as/4000443602-894_black_4.avif?width=556&height=556&fit=contain",
+          "https://gdx-assets.costco.com/adobe/assets/urn:aaid:aem:23a1a93f-4906-48ac-99a3-e187a82a8816/as/4000443602-894_black_5.avif?width=556&height=556&fit=contain"
+        ],
+        "offers": [],
+        "evidence": "page.md"
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:46:41.028Z",
+        "completedAt": "2026-10-11T01:46:41.167Z",
+        "durationMs": 139.772,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 59657,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 5006.617,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 57.901,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 355.974,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 144.47,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 64.873,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 4322.374,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 50.673,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 6.41,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 12458,
+      "outputTokens": 938,
+      "requestMs": 4320.449
+    }
+  }
+}

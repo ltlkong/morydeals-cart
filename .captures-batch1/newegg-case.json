@@ -1,0 +1,137 @@
+{
+  "taskId": "dcd9786d-38ad-48fe-8d4a-e79d60328537",
+  "attemptId": "8f1b847c-aa3c-4448-8429-8e9f639bec31",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.newegg.ca/69d1af282f3ad85d/dcd9786d-38ad-48fe-8d4a-e79d60328537--8f1b847c-aa3c-4448-8429-8e9f639bec31",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "newegg-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.newegg.ca/p/N82E16811146380",
+        "title": "NZXT H6 RGB+ (2026) Compact Dual-chamber ATX Case - All Black",
+        "sku": "N82E16811146380",
+        "brand": "NZXT",
+        "images": [
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-10.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-11.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-12.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-13.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-14.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-15.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-16.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-17.jpg",
+          "https://c1.neweggimages.com/ProductImageOriginal/11-146-380-18.jpg"
+        ],
+        "evidence": "window.__initialState__.ItemDetail",
+        "offers": [
+          {
+            "condition": "new",
+            "amountMinor": 27999,
+            "compareAtAmountMinor": 29999,
+            "compareAtEvidence": "window.__initialState__.ItemDetail.OriginalUnitPrice",
+            "currency": "CAD",
+            "currencyEvidence": "window.__neweggState__.currency.currencyCode",
+            "seller": "Newegg Canada",
+            "url": "https://www.newegg.ca/p/N82E16811146380",
+            "evidence": "window.__initialState__.ItemDetail.FinalPrice",
+            "availability": "InStock"
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:45:31.725Z",
+        "completedAt": "2026-10-11T01:45:34.469Z",
+        "durationMs": 2743.383,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-1.body"
+      }
+    ],
+    "selectedCapture": 1
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "newegg-ca",
+    "evidence": [
+      "url:www.newegg.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "browser",
+        "browser": "camoufox",
+        "blockResources": [
+          "image",
+          "media",
+          "font"
+        ],
+        "actions": [],
+        "timeoutMs": 30000,
+        "waitFor": {
+          "minTextLength": 80
+        }
+      },
+      "parsing": {
+        "strategy": "newegg-ca"
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 2900.317,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 58.765,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.655,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 2744.132,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 2.29,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 18.204,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 53.823,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 17.846,
+        "status": "completed"
+      }
+    }
+  }
+}

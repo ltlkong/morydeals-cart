@@ -1,0 +1,1761 @@
+diff --git a/apps/worker/src/acquisition/acquisition.module.ts b/apps/worker/src/acquisition/acquisition.module.ts
+index 103ea7c..0f51029 100644
+--- a/apps/worker/src/acquisition/acquisition.module.ts
++++ b/apps/worker/src/acquisition/acquisition.module.ts
+@@ -8,6 +8,7 @@ import {
+ } from './network/domain-limiter.ts';
+ import { UrlPolicy } from './network/url-policy.ts';
+ import { ShopifyDriver } from './shopify/shopify.driver.ts';
++import { ApiDrivers, HomeDepotDriver } from './homedepot/homedepot.driver.ts';
+ import { HttpDriver } from './http/http.driver.ts';
+ import { BrowserDriver } from './browser/browser.driver.ts';
+ import { AcquisitionRunner } from './acquisition.runner.ts';
+@@ -62,7 +63,15 @@ export class AcquisitionModule {
+                 http,
+                 browser,
+                 interactive: browser,
+-                api: new ShopifyDriver(new UrlPolicy(), limiter, config.maxBytes, network),
++                api: new ApiDrivers({
++                  shopify: new ShopifyDriver(new UrlPolicy(), limiter, config.maxBytes, network),
++                  'homedepot-ca': new HomeDepotDriver(
++                    new UrlPolicy(),
++                    limiter,
++                    config.maxBytes,
++                    network,
++                  ),
++                }),
+               },
+               config.maxBytes,
+               config.maxBudgetMs,
+diff --git a/apps/worker/src/acquisition/homedepot/homedepot.driver.ts b/apps/worker/src/acquisition/homedepot/homedepot.driver.ts
+new file mode 100644
+index 0000000..1c9353d
+--- /dev/null
++++ b/apps/worker/src/acquisition/homedepot/homedepot.driver.ts
+@@ -0,0 +1,110 @@
++import { load } from 'cheerio';
++import { CookieJar } from 'tough-cookie';
++import { homeDepotProductId } from '../../parsing/parsers/index.ts';
++import { homeDepotStateProduct } from '../../parsing/parsers/retailers/homedepot.ts';
++import {
++  AcquisitionError,
++  type AcquisitionDriver,
++  type DriverRequest,
++} from '../acquisition.types.ts';
++import { HttpTransport, decodeHtml, decodeResponse } from '../http/http.transport.ts';
++import type { DomainLimiter } from '../network/domain-limiter.ts';
++import { NetworkSessions } from '../network/network-sessions.ts';
++import { UrlPolicy } from '../network/url-policy.ts';
++import { pageChallenge } from '../product-readiness.ts';
++
++/** The localized price and stock homedepot.ca's product page loads for the shopper's store. */
++export const homeDepotLocalizedUrl = (productId: string, store: string, lang: 'en' | 'fr') =>
++  `https://www.homedepot.ca/api/productsvc/v1/products-localized-basic?products=${productId}&store=${store}&lang=${lang}`;
++
++/**
++ * Home Depot Canada renders the product server-side (the `hdca-state` catalogue entry) but loads the price the
++ * shopper sees, and its stock, per store after the page arrives. This reads both the way the page does: the page
++ * over HTTP, then that store's localized row with the page as referrer and the page's cookies. Both raw responses
++ * are archived; the capture parsed is the product entry and the localized answer together, so a replay needs
++ * nothing else. No proxy, challenge handling or retries beyond the configured fallback.
++ */
++export class HomeDepotDriver implements AcquisitionDriver {
++  constructor(
++    private readonly policy: UrlPolicy,
++    private readonly limiter: DomainLimiter,
++    private readonly maxBytes: number,
++    private readonly network = new NetworkSessions(),
++  ) {}
++  async fetch(request: DriverRequest) {
++    const { step, signal, url, archive, context } = request;
++    if (step.mode !== 'api' || step.provider !== 'homedepot-ca')
++      throw new AcquisitionError('unsupported_capability', 'Home Depot requires its API step');
++    const productId = homeDepotProductId(url);
++    if (!productId)
++      throw new AcquisitionError('unsupported_content', 'Unsupported Home Depot product URL');
++    return this.network.run(request, async (proxyUrl) => {
++      const transport = new HttpTransport(this.policy, this.limiter, step.timeoutMs, this.maxBytes);
++      const cookieJar = new CookieJar();
++      const page =
++        request.prefetchedPage ??
++        (await transport.fetch(url, archive, {
++          locale: context.locale,
++          signal,
++          proxyUrl,
++          cookieJar,
++        }));
++      const html = decodeHtml(page.body, page.capture, this.maxBytes);
++      const challenge = pageChallenge(page.capture.url, page.capture.status, html);
++      if (challenge) throw new AcquisitionError('blocked', challenge);
++      if (homeDepotProductId(page.capture.url) !== productId)
++        throw new AcquisitionError('incomplete', 'Home Depot redirected to a different product');
++      let state: unknown;
++      try {
++        state = JSON.parse(load(html)('script#hdca-state').first().text());
++      } catch {
++        throw new AcquisitionError('incomplete', 'Home Depot page has no product state');
++      }
++      const product = homeDepotStateProduct(state, productId);
++      if (!product)
++        throw new AcquisitionError('incomplete', 'Home Depot page has no product entry');
++      const lang = /^\/produit\//i.test(new URL(page.capture.url).pathname) ? 'fr' : 'en';
++      const endpoint = homeDepotLocalizedUrl(productId, step.store, lang);
++      const response = await transport.fetch(endpoint, archive, {
++        signal,
++        proxyUrl,
++        cookieJar,
++        api: { referer: page.capture.url },
++      });
++      let localized: unknown;
++      try {
++        localized = JSON.parse(
++          decodeResponse(response.body, response.capture, this.maxBytes, 'json'),
++        );
++      } catch {
++        throw new AcquisitionError(
++          'unsupported_content',
++          'Home Depot price API did not return JSON',
++        );
++      }
++      if (!Array.isArray(localized) || !localized.length)
++        throw new AcquisitionError('incomplete', 'Home Depot price API returned no product');
++      const body = Buffer.from(JSON.stringify({ product, localized }));
++      const capture = await archive.capture(body, {
++        kind: 'api-response',
++        homeDepot: { productId, store: step.store, lang },
++        url: endpoint,
++        status: response.capture.status,
++        headers: { 'content-type': 'application/json; charset=utf-8' },
++        capturedAt: response.capture.capturedAt,
++        truncated: false,
++      });
++      return { body, capture };
++    });
++  }
++}
++
++/** API steps by provider: each store's own product API. */
++export class ApiDrivers implements AcquisitionDriver {
++  constructor(private readonly drivers: Record<'shopify' | 'homedepot-ca', AcquisitionDriver>) {}
++  fetch(request: DriverRequest) {
++    if (request.step.mode !== 'api')
++      throw new AcquisitionError('unsupported_capability', 'Not an API step');
++    return this.drivers[request.step.provider].fetch(request);
++  }
++}
+diff --git a/apps/worker/src/acquisition/http/http.transport.ts b/apps/worker/src/acquisition/http/http.transport.ts
+index 7caaa4d..a47c9a6 100644
+--- a/apps/worker/src/acquisition/http/http.transport.ts
++++ b/apps/worker/src/acquisition/http/http.transport.ts
+@@ -79,7 +79,14 @@ export interface HttpRequestOptions {
+   proxyUrl?: string;
+   /** Read-only GraphQL query, archived by the caller. Redirects are forbidden. */
+   json?: { query: string; variables: Record<string, unknown> };
+-  capture?: Pick<Capture, 'kind' | 'shopify'>;
++  capture?: Pick<Capture, 'kind' | 'shopify' | 'homeDepot'>;
++  /** A JSON GET a page makes for itself (its own API): JSON accepted, the page as referrer. */
++  api?: { referer: string };
++  /**
++   * Cookies to share with the fetch that loaded the page this one belongs to, as the page's own requests would.
++   * Without it each fetch is a new visitor.
++   */
++  cookieJar?: CookieJar;
+ }
+ 
+ const acceptLanguage = (locale: string) => {
+@@ -89,6 +96,7 @@ const acceptLanguage = (locale: string) => {
+ // The client sends Chrome's own navigation headers to match its fingerprint; only the request's own are added.
+ const ownHeaders = (options: HttpRequestOptions) => ({
+   ...(options.json ? { accept: 'application/json', 'content-type': 'application/json' } : {}),
++  ...(options.api ? { accept: 'application/json', referer: options.api.referer } : {}),
+   ...(options.locale ? { 'accept-language': acceptLanguage(options.locale) } : {}),
+ });
+ 
+@@ -133,7 +141,7 @@ export class HttpTransport {
+         followRedirects: false,
+         proxyUrl: proxy.href,
+         // A browser carries cookies a redirect sets to the next hop. Each fetch is a new visitor.
+-        cookieJar: new CookieJar(),
++        cookieJar: options.cookieJar ?? new CookieJar(),
+       });
+       for (let redirects = 0; redirects <= 5; redirects++) {
+         await this.limiter.wait(url.hostname);
+@@ -152,10 +160,12 @@ export class HttpTransport {
+         if (capture.truncated)
+           throw new ResponseError('limit_exceeded', 'Response body exceeded byte limit', false);
+         if ([301, 302, 303, 307, 308].includes(capture.status) && capture.headers.location) {
+-          if (options.json)
++          if (options.json || options.api)
+             throw new ResponseError(
+               'http_error',
+-              'GraphQL endpoint redirects are not permitted',
++              options.json
++                ? 'GraphQL endpoint redirects are not permitted'
++                : 'Store API redirects are not permitted',
+               false,
+             );
+           if (redirects === 5)
+diff --git a/apps/worker/src/acquisition/product-readiness.ts b/apps/worker/src/acquisition/product-readiness.ts
+index 3af048d..77d845b 100644
+--- a/apps/worker/src/acquisition/product-readiness.ts
++++ b/apps/worker/src/acquisition/product-readiness.ts
+@@ -10,12 +10,27 @@ export function productReadiness(html: string): ProductReadiness {
+     .toArray()
+     .some((element) => /price|offer|buy/i.test(Object.values(element.attribs).join(' ')));
+   if (pendingPrice) return { ready: false, reason: 'Price content is still loading' };
++  // A price module still showing only its loading skeleton (Target renders the price after the page arrives).
++  const placeholderPrice = $('[data-test],[data-testid],[data-module-type],[class],[id]')
++    .toArray()
++    .some((element) => {
++      const { class: _class, style: _style, ...named } = element.attribs;
++      if (!/price/i.test(Object.values(named).join(' '))) return false;
++      const node = $(element);
++      return (
++        /\d/.test(node.text()) === false &&
++        node.find('[class*="laceholder"],[class*="keleton"],[data-test*="placeholder"]').length > 0
++      );
++    });
++  if (placeholderPrice) return { ready: false, reason: 'Price content is still loading' };
+   let zeroOffer = false;
+   function productOffer(value: unknown): boolean {
+     if (Array.isArray(value)) return value.some(productOffer);
+     if (!value || typeof value !== 'object') return false;
+     const item = value as Record<string, unknown>;
+     const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
++    // A ProductGroup's offers live on its variants (lululemon).
++    if (types.includes('ProductGroup') && productOffer(item.hasVariant)) return true;
+     if (types.includes('Product') && typeof item.name === 'string' && item.name.trim()) {
+       const offers = Array.isArray(item.offers) ? item.offers : [item.offers];
+       if (
+@@ -50,12 +65,23 @@ export function productReadiness(html: string): ProductReadiness {
+     }
+   }
+   if (zeroOffer) return { ready: false, reason: 'Structured price is zero and needs confirmation' };
+-  $(
+-    'script,style,noscript,template,header,footer,nav,aside,[hidden],[aria-hidden="true"]',
+-  ).remove();
++  const title =
++    $('head title').first().text() || $('meta[property="og:title"]').attr('content') || '';
++  $('script,style,noscript,template,header,footer,nav,[hidden],[aria-hidden="true"]').remove();
++  // A side panel is noise unless it is the buy box holding the product heading (lululemon).
++  $('aside')
++    .filter((_, element) => $(element).find('h1').text().trim().length === 0)
++    .remove();
+   const main = $('main,[role="main"]').first();
+-  const region = main.length ? main : $('body');
+-  const headings = region.find('h1').filter((_, element) => $(element).text().trim().length > 0);
++  // Some stores render the product heading outside <main> (SportChek); the page body is then the region.
++  const region = main.length && main.find('h1').text().trim() ? main : $('body');
++  let headings = region.find('h1').filter((_, element) => $(element).text().trim().length > 0);
++  // Pages that also use <h1> for section titles (Home Depot specification groups, amazon.com "About this
++  // item"): the primary heading is the one the document title names.
++  if (headings.length > 1) {
++    const titled = headings.filter((_, element) => namedByTitle($(element).text(), title));
++    if (titled.length === 1) headings = titled;
++  }
+   if (headings.length !== 1)
+     return { ready: false, reason: 'A single primary product heading is missing' };
+   region.find('h1,h2,h3,p,div,span,br,li').append(' ');
+@@ -70,6 +96,23 @@ export function productReadiness(html: string): ProductReadiness {
+   return { ready: false, reason: 'Primary content has no price or availability evidence' };
+ }
+ 
++const words = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
++/** The document title starts with the heading, or with its start when the title is cut short ("Kit - w..."),
++ * optionally after a store prefix ("Amazon.com: …"). */
++function namedByTitle(heading: string, title: string): boolean {
++  const text = words(heading);
++  const name = words(title);
++  if (text.length < 12 || !name) return false;
++  const prefix = name.indexOf(': ');
++  for (const start of prefix < 0 ? [0] : [0, prefix + 2]) {
++    const rest = name.slice(start).replace(/(?:\.{3}|…).*$/, '');
++    let common = 0;
++    while (common < text.length && common < rest.length && text[common] === rest[common]) common++;
++    if (common >= 12 && common >= Math.min(text.length, rest.length, 40)) return true;
++  }
++  return false;
++}
++
+ export function pageChallenge(url: string, status: number, html: string): string | undefined {
+   const amazon = amazonPageChallenge(url, status, html);
+   if (amazon) return amazon;
+diff --git a/apps/worker/src/acquisition/shopify/shopify.driver.ts b/apps/worker/src/acquisition/shopify/shopify.driver.ts
+index 081bee2..96a391b 100644
+--- a/apps/worker/src/acquisition/shopify/shopify.driver.ts
++++ b/apps/worker/src/acquisition/shopify/shopify.driver.ts
+@@ -24,7 +24,7 @@ export class ShopifyDriver implements AcquisitionDriver {
+   ) {}
+   async fetch(request: DriverRequest) {
+     const { step, signal, url, archive, stepIndex, context } = request;
+-    if (step.mode !== 'api')
++    if (step.mode !== 'api' || step.provider !== 'shopify')
+       throw new AcquisitionError('unsupported_capability', 'Shopify requires API acquisition');
+     return this.network.run(request, async (proxyUrl) => {
+       const transport = new HttpTransport(this.policy, this.limiter, step.timeoutMs, this.maxBytes);
+diff --git a/apps/worker/src/audit/raw-archive.ts b/apps/worker/src/audit/raw-archive.ts
+index af6f928..103a748 100644
+--- a/apps/worker/src/audit/raw-archive.ts
++++ b/apps/worker/src/audit/raw-archive.ts
+@@ -7,6 +7,8 @@ import { packAuditBundle, readAuditBundle } from './audit-bundle.ts';
+ export interface Capture {
+   kind?: 'http-response' | 'rendered-dom' | 'api-response';
+   shopify?: import('../parsing/parsers/index.ts').ShopifyTarget;
++  /** A Home Depot capture combining the page's product entry with one store's localized price and stock. */
++  homeDepot?: { productId: string; store: string; lang: 'en' | 'fr' };
+   url: string;
+   status: number;
+   headers: Record<string, string | string[] | undefined>;
+diff --git a/apps/worker/src/decision/workflow-decision.service.ts b/apps/worker/src/decision/workflow-decision.service.ts
+index 54e7a15..970065f 100644
+--- a/apps/worker/src/decision/workflow-decision.service.ts
++++ b/apps/worker/src/decision/workflow-decision.service.ts
+@@ -47,19 +47,36 @@ export class WorkflowDecisionService {
+     };
+     const retailer = retailerForUrl(url);
+     if (retailer) {
+-      const httpFirst = retailer === 'amazon-ca' || retailer === 'walmart-ca';
+-      const retailerBrowser =
+-        retailer === 'amazon-ca' ? { ...browser, waitFor: { selector: '#productTitle' } } : browser;
++      const amazon = retailer === 'amazon-ca' || retailer === 'amazon';
++      const httpFirst = amazon || retailer === 'walmart-ca';
++      const retailerBrowser = amazon
++        ? { ...browser, waitFor: { selector: '#productTitle' } }
++        : retailer === 'ctc-ca'
++          ? { ...browser, waitFor: { selector: 'div.nl-buy-box > .nl-price .nl-price--charge' } }
++          : browser;
++      // Home Depot Canada prices by store; HOMEDEPOT_CA_STORE picks it (default 7001, Scarborough ON).
++      const homeDepot = {
++        mode: 'api' as const,
++        provider: 'homedepot-ca' as const,
++        store: /^\d{4}$/.test(process.env.HOMEDEPOT_CA_STORE ?? '')
++          ? process.env.HOMEDEPOT_CA_STORE!
++          : '7001',
++        timeoutMs: http.timeoutMs,
++        network: input.network,
++      };
+       const context = CrawlContextSchema.parse({
+         ...base,
+-        acquisition: httpFirst
+-          ? {
+-              ...http,
+-              waitFor: {
+-                selector: retailer === 'amazon-ca' ? '#productTitle' : 'script#__NEXT_DATA__',
+-              },
+-            }
+-          : retailerBrowser,
++        acquisition:
++          retailer === 'homedepot-ca'
++            ? homeDepot
++            : httpFirst
++              ? {
++                  ...http,
++                  waitFor: {
++                    selector: amazon ? '#productTitle' : 'script#__NEXT_DATA__',
++                  },
++                }
++              : retailerBrowser,
+         fallback: httpFirst
+           ? [
+               {
+diff --git a/apps/worker/src/decision/workflow-decision.ts b/apps/worker/src/decision/workflow-decision.ts
+index 2533e7a..e02456f 100644
+--- a/apps/worker/src/decision/workflow-decision.ts
++++ b/apps/worker/src/decision/workflow-decision.ts
+@@ -1,11 +1,12 @@
+ import type { CrawlContext } from '@morydeals/capture-contracts';
+ import type { CapturedPage } from '../acquisition/acquisition.types.ts';
++import type { Retailer } from '../parsing/parsers/retailers/routing.ts';
+ 
+ export interface WorkflowDecision {
+   version: 1;
+   policyVersion: '1.0.0';
+   mode: 'auto';
+-  platform: 'amazon-ca' | 'bestbuy-ca' | 'newegg-ca' | 'walmart-ca' | 'shopify' | 'unknown';
++  platform: Retailer | 'shopify' | 'unknown';
+   evidence: string[];
+   issues: string[];
+   workflow: CrawlContext;
+diff --git a/apps/worker/src/parsing/document/document-preparation.service.ts b/apps/worker/src/parsing/document/document-preparation.service.ts
+index b842718..1c4f26e 100644
+--- a/apps/worker/src/parsing/document/document-preparation.service.ts
++++ b/apps/worker/src/parsing/document/document-preparation.service.ts
+@@ -15,6 +15,25 @@ export class DocumentPreparationService {
+   }
+   async prepare(page: CapturedPage, archive: Archive, contextInput: CrawlContextInput) {
+     const context = CrawlContextSchema.parse(contextInput);
++    if (page.capture.kind === 'api-response' && page.capture.homeDepot) {
++      const combined = JSON.parse(decodeResponse(page.body, page.capture, this.maxBytes, 'json'));
++      const document: PageDocument = {
++        version: '1',
++        url: archive.raw.requestedUrl,
++        requestedUrl: archive.raw.requestedUrl,
++        fetchedAt: page.capture.capturedAt,
++        markdown: '',
++        metadata: {},
++        jsonLd: [],
++        homeDepot: { ...page.capture.homeDepot, ...combined },
++      };
++      await archive.artifact('document.json', JSON.stringify(document, null, 2));
++      await archive.artifact(
++        'conversion.json',
++        JSON.stringify({ source: 'homedepot-localized', format: 'json' }),
++      );
++      return document;
++    }
+     if (page.capture.kind === 'api-response') {
+       if (!page.capture.shopify)
+         throw new AcquisitionError('unsupported_content', 'Missing API response provenance');
+@@ -40,9 +59,15 @@ export class DocumentPreparationService {
+     }
+     const html = page.html ?? decodeHtml(page.body, page.capture, this.maxBytes);
+     if (
+-      ['amazon-ca', 'bestbuy-ca', 'newegg-ca', 'walmart-ca'].includes(
+-        context.parsing?.strategy ?? '',
+-      )
++      [
++        'amazon-ca',
++        'amazon',
++        'bestbuy-ca',
++        'newegg-ca',
++        'walmart-ca',
++        'ctc-ca',
++        'homedepot-ca',
++      ].includes(context.parsing?.strategy ?? '')
+     ) {
+       const document: PageDocument = {
+         version: '1',
+diff --git a/apps/worker/src/parsing/document/html-to-markdown.ts b/apps/worker/src/parsing/document/html-to-markdown.ts
+index 9c5390d..f97d7f6 100644
+--- a/apps/worker/src/parsing/document/html-to-markdown.ts
++++ b/apps/worker/src/parsing/document/html-to-markdown.ts
+@@ -101,6 +101,12 @@ export function convertHtml(
+       tag.removeAttr(attr);
+     }
+   });
++  // A table without rows (amazon.com layout tables) crashes the GFM table rule; keep its content instead.
++  $('table')
++    .filter((_i, node) => $(node).find('tr').length === 0)
++    .each((_i, node) => {
++      $(node).replaceWith($(node).contents());
++    });
+   const cleanedHtml = $('body').html() ?? $.html();
+   const turndown = new TurndownService({
+     headingStyle: 'atx',
+diff --git a/apps/worker/src/parsing/parsers/index.ts b/apps/worker/src/parsing/parsers/index.ts
+index 38ce0cf..c3a4652 100644
+--- a/apps/worker/src/parsing/parsers/index.ts
++++ b/apps/worker/src/parsing/parsers/index.ts
+@@ -37,5 +37,8 @@ export { detectShopify } from './shopify/detection.ts';
+ export { amazonPageChallenge } from './retailers/amazon-page.ts';
+ 
+ export { parseWalmartProduct } from './retailers/walmart.ts';
++export { parseCtcProduct } from './retailers/ctc.ts';
++export { parseHomeDepotProduct, homeDepotProductId } from './retailers/homedepot.ts';
++export { amazonStore } from './retailers/amazon-page.ts';
+ export { retailerForUrl } from './retailers/routing.ts';
+ export { htmlCaptureStrategy } from './html-capture.ts';
+diff --git a/apps/worker/src/parsing/parsers/parser.ts b/apps/worker/src/parsing/parsers/parser.ts
+index cf9e460..bad79ab 100644
+--- a/apps/worker/src/parsing/parsers/parser.ts
++++ b/apps/worker/src/parsing/parsers/parser.ts
+@@ -24,6 +24,26 @@ const list = (value: unknown): unknown[] =>
+ const text = (value: unknown): string | undefined =>
+   typeof value === 'string' && value.trim() ? value.trim() : undefined;
+ const named = (value: unknown): string | undefined => text(value) ?? text(object(value).name);
++/** A name as plain text: some stores put markup in JSON-LD names (Simons "Capri camp shirt <b>Relaxed fit</b>"). */
++const plainName = (value: unknown): string | undefined =>
++  text(
++    text(value)
++      ?.replace(/<[^>]*>/g, ' ')
++      .replace(/\s+/g, ' '),
++  );
++/** Image URLs that are still templates the page fills in with script (SSENSE `/images/__IMAGE_PARAMS__/`). */
++const TEMPLATE = /__[A-Z][A-Z_]*__|\{\{|%7B%7B/;
++/**
++ * Properties whose Product values are other products (the phone a case fits, similar items), never this page's
++ * product (Apple `isAccessoryOrSparePartFor`).
++ */
++const RELATED = new Set([
++  'isAccessoryOrSparePartFor',
++  'isConsumableFor',
++  'isRelatedTo',
++  'isSimilarTo',
++  'accessoryOrSparePartFor',
++]);
+ const isType = (value: ObjectValue, type: string) =>
+   list(value['@type']).some(
+     (t) => typeof t === 'string' && t.replace(/^https?:\/\/schema.org\//, '') === type,
+@@ -116,7 +136,7 @@ function parseSources(document: PageDocument, strategy: string): ParseResult {
+     if (text(node['@id']) && Object.keys(node).length > 1) ids.set(String(node['@id']), node);
+     // A ProductGroup's hasVariant entries are its variants: they inherit its name, rating and variesBy.
+     for (const [key, child] of Object.entries(node))
+-      if (typeof child === 'object')
++      if (typeof child === 'object' && !RELATED.has(key))
+         walk(
+           child,
+           `${path}.${key}`,
+@@ -213,24 +233,33 @@ function parseSources(document: PageDocument, strategy: string): ParseResult {
+   const page = identityUrl(document.url);
+   const requested = identityUrl(document.requestedUrl ?? document.url);
+   const here = (url: string | undefined) => !!url && [page, requested].includes(identityUrl(url));
++  const groups = new Map<Product, { group: ObjectValue; path: string }>();
+   let products: Product[] = nodes
+     .filter((n) => isType(n.value, 'Product'))
+     .flatMap(({ value, path, group }) => {
+       // Ignore @id references; include full Product nodes only once.
+-      const title = text(value.name) ?? text(group?.name);
++      // A variant named "<group name> – RED / S" is the group's product; its options say which one.
++      const own = plainName(value.name);
++      const groupName = plainName(group?.name);
++      const title = groupName && (!own || own.startsWith(groupName)) ? groupName : own;
+       if (!title) return [];
+-      const url = webUrl(value.url, document.url) ?? document.url;
++      let quoted = offers(value.offers, `${path}.offers`);
++      // A ProductGroup variant without its own url is at its one offer's url (UNIQLO `?colorDisplayCode=…`).
++      const offerUrl = group && quoted.length === 1 ? quoted[0].url : undefined;
++      const url = webUrl(value.url, document.url) ?? offerUrl ?? document.url;
+       const identity = text(value['@id']) ?? `${url}\n${text(value.sku) ?? ''}\n${title}`;
+       if (seen.has(identity)) return [];
+       seen.add(identity);
+-      const images = list(value.image).flatMap((img) => {
+-        const image = webUrl(
+-          typeof img === 'string' ? img : (object(img).url ?? object(img).contentUrl),
+-          document.url,
+-        );
+-        return image ? [image] : [];
+-      });
+-      let quoted = offers(value.offers, `${path}.offers`);
++      const pictures = (source: unknown) =>
++        list(source).flatMap((img) => {
++          const image = webUrl(
++            typeof img === 'string' ? img : (object(img).url ?? object(img).contentUrl),
++            document.url,
++          );
++          return image && !TEMPLATE.test(image) ? [image] : [];
++        });
++      // The variant's own pictures first, then the group's gallery.
++      const images = [...pictures(value.image), ...(group ? pictures(group.image) : [])];
+       let productUrl = url;
+       let sku = text(value.sku);
+       let selection: Product['variant'];
+@@ -268,7 +297,10 @@ function parseSources(document: PageDocument, strategy: string): ParseResult {
+           offers: quoted.map(({ sku: _sku, options: _options, ...offer }) => offer),
+           evidence: path,
+         },
+-      ];
++      ].map((product) => {
++        if (group) groups.set(product, { group, path });
++        return product;
++      });
+     });
+   const meta = (key: string) => document.metadata[key]?.[0];
+   if (
+@@ -333,8 +365,15 @@ function parseSources(document: PageDocument, strategy: string): ParseResult {
+   const distinctUrls = new Set(products.map((p) => p.url));
+   const matching = products.filter((p) => here(p.url));
+   if (distinctUrls.size > 1 && matching.length) products = matching;
+-  const ambiguous = distinctUrls.size > 1 && !matching.length;
+-  if (ambiguous) issues.push('Multiple product URLs with no exact page match');
++  let ambiguous = distinctUrls.size > 1 && !matching.length;
++  if (ambiguous) {
++    const chosen = partialSelection(products, groups, document);
++    if (chosen) {
++      products = [chosen];
++      ambiguous = false;
++    } else issues.push('Multiple product URLs with no exact page match');
++  }
++  if (products.length === 1) products = [withPageFacts(products[0], nodes, document)];
+   if (new Set(products.map((p) => p.url)).size !== products.length) {
+     return {
+       parserVersion: PARSER_VERSION,
+@@ -356,6 +395,121 @@ function parseSources(document: PageDocument, strategy: string): ParseResult {
+   };
+ }
+ 
++/**
++ * What else the page states about its one product: the BreadcrumbList as its category path (without the home
++ * crumb or the product itself), an ImageGallery's pictures after its own, and og:image when JSON-LD has no usable
++ * picture (SSENSE's are templates).
++ */
++function withPageFacts(
++  product: Product,
++  nodes: { value: ObjectValue }[],
++  document: PageDocument,
++): Product {
++  const crumbs = nodes.find((n) => isType(n.value, 'BreadcrumbList'))?.value;
++  const categories = list(crumbs?.itemListElement)
++    .map(object)
++    .sort((a, b) => Number(a.position) - Number(b.position))
++    .flatMap((item) => {
++      const name = plainName(item.name) ?? plainName(object(item.item).name);
++      const link = text(item.item) ?? text(object(item.item)['@id']) ?? text(object(item.item).url);
++      let root = false;
++      try {
++        root =
++          !!link &&
++          new URL(link, document.url).pathname.replace(/\/(?:[a-z]{2}(?:-[a-z]{2})?\/?)?$/i, '') ===
++            '';
++      } catch {
++        /* a crumb without a usable link keeps its name */
++      }
++      return name && !root && !/^home$/i.test(name) && name !== product.title ? [name] : [];
++    });
++  const gallery = nodes
++    .filter((n) => isType(n.value, 'ImageGallery'))
++    .flatMap((n) => list(n.value.associatedMedia).map(object))
++    .flatMap((media) => {
++      const image = webUrl(text(media.contentUrl) ?? text(media.url), document.url);
++      return image && !TEMPLATE.test(image) ? [image] : [];
++    });
++  const og = (document.metadata['og:image'] ?? []).flatMap((value) => {
++    const image = webUrl(value, document.url);
++    return image && !TEMPLATE.test(image) ? [image] : [];
++  });
++  const images = [...new Set([...product.images, ...gallery])];
++  return {
++    ...product,
++    ...(categories.length && !product.categories ? { categories } : {}),
++    images: images.length ? images : og,
++  };
++}
++
++/**
++ * A page that selects only some, or none, of a ProductGroup's options (lululemon `?color=63787` with no size, a
++ * Shopify URL without `?variant=`): the variants at this path whose URLs carry every parameter of the page URL.
++ * When they all state the same price, that price is this page's product (with the options they share);
++ * otherwise nothing is chosen.
++ */
++function partialSelection(
++  products: Product[],
++  groups: Map<Product, { group: ObjectValue; path: string }>,
++  document: PageDocument,
++): Product | undefined {
++  const page = new URL(identityUrl(document.url));
++  const params = [...page.searchParams.entries()];
++  const candidates = products.filter((product) => {
++    if (!groups.has(product)) return false;
++    const url = new URL(product.url);
++    return (
++      url.pathname.toLowerCase() === page.pathname.toLowerCase() &&
++      params.every(([k, v]) => url.searchParams.get(k) === v)
++    );
++  });
++  if (candidates.length < 2) return;
++  const { group, path: variantPath } = groups.get(candidates[0])!;
++  const path = variantPath.replace(/\.hasVariant\[\d+\]$/, '');
++  if (candidates.some((product) => groups.get(product)!.group !== group)) return;
++  const offers = candidates.map((product) => product.offers);
++  if (offers.some((list) => list.length !== 1)) return;
++  const quotes = offers.map((list) => list[0]);
++  const same = <K extends keyof Offer>(key: K) => new Set(quotes.map((q) => q[key])).size === 1;
++  if (!same('amountMinor') || !same('currency') || !same('compareAtAmountMinor')) return;
++  const first = quotes[0];
++  const inStock = quotes.find((q) => q.availability === 'InStock');
++  const options = (candidates[0].variant?.options ?? []).filter((option) =>
++    candidates.every((product) =>
++      product.variant?.options.some((o) => o.name === option.name && o.value === option.value),
++    ),
++  );
++  const chosen = variant(
++    options,
++    `${path}.hasVariant (${candidates.length} matching ${page.search || page.pathname})`,
++  );
++  const { url: _url, availability: _availability, evidence: _evidence, ...quote } = first;
++  const url = page.href;
++  return {
++    url,
++    title: plainName(group.name) ?? candidates[0].title,
++    description: text(group.description) ?? candidates[0].description,
++    brand: named(group.brand) ?? candidates[0].brand,
++    sku: text(group.productGroupID) ?? text(group.sku),
++    ...(chosen ? { variant: chosen } : {}),
++    ...(candidates[0].rating ? { rating: candidates[0].rating } : {}),
++    images: [...new Set(candidates.flatMap((product) => product.images))],
++    offers: [
++      {
++        ...quote,
++        ...(same('condition') ? {} : { condition: undefined }),
++        ...(same('seller') ? {} : { seller: undefined }),
++        url,
++        // In stock when any matching variant is; otherwise what they state together.
++        availability:
++          inStock?.availability ?? (same('availability') ? first.availability : undefined),
++        evidence: `${path}.hasVariant`,
++      },
++    ],
++    evidence: path,
++  };
++}
++
+ export const jsonLdStrategy: ParserStrategy = {
+   id: 'schema-org',
+   parse: (document) => parseSources(document, 'schema-org'),
+diff --git a/apps/worker/src/parsing/parsers/retailers/amazon-page.ts b/apps/worker/src/parsing/parsers/retailers/amazon-page.ts
+index 9b25cd4..cb21fe2 100644
+--- a/apps/worker/src/parsing/parsers/retailers/amazon-page.ts
++++ b/apps/worker/src/parsing/parsers/retailers/amazon-page.ts
+@@ -1,13 +1,59 @@
+ import { htmlDocument, one } from '../shared/html.ts';
+ 
++/**
++ * The Amazon storefronts the parser reads: each states prices in its own currency with a dot decimal mark, so a
++ * price label must be a full amount in that currency ("$95.99", "CDN$ 95.99", "£19.99"). Storefronts with a
++ * comma decimal mark (amazon.de, .fr, .it, .es) or no minor unit (amazon.co.jp) are not supported.
++ */
++export type AmazonStore = { host: string; currency: string; price: RegExp };
++const AMOUNT = String.raw`(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?`;
++const store = (host: string, currency: string, symbol: string): AmazonStore => ({
++  host,
++  currency,
++  price: new RegExp(`^(?:${symbol}\\s*|${currency}\\s+)?${AMOUNT}(?:\\s*${currency})?$`),
++});
++const STORES = [
++  store('amazon.ca', 'CAD', String.raw`(?:CAD|CDN|CA|C)?\s*\$`),
++  store('amazon.com', 'USD', String.raw`(?:USD|US)?\s*\$`),
++  store('amazon.co.uk', 'GBP', '£'),
++  store('amazon.com.au', 'AUD', String.raw`(?:AUD|AU|A)?\s*\$`),
++];
++/**
++ * The storefront as the page shows it: a visitor from abroad sees amazon.com prices converted to the currency of
++ * preference the page states ("CAD 117.39"); the offers are in that currency.
++ */
++export function displayedStore(store: AmazonStore, preferred: string[]): AmazonStore {
++  const [currency] = [...new Set(preferred)];
++  if (!currency || preferred.some((value) => value !== currency) || currency === store.currency)
++    return store;
++  if (!/^[A-Z]{3}$/.test(currency)) return store;
++  const own = STORES.find((candidate) => candidate.currency === currency);
++  return {
++    host: store.host,
++    currency,
++    price: own?.price ?? new RegExp(`^${currency}\\s*${AMOUNT}$`),
++  };
++}
++/** The storefront an Amazon URL is on (exact host, no port or credentials), else undefined. */
++export function amazonStore(value: string): AmazonStore | undefined {
++  try {
++    const url = new URL(value);
++    if (url.port || url.username || url.password || !['https:', 'http:'].includes(url.protocol))
++      return;
++    const host = url.hostname.replace(/^www\./, '');
++    return STORES.find((candidate) => candidate.host === host);
++  } catch {
++    return;
++  }
++}
++
+ /** Classify Amazon's own verification document before extracting product facts. */
+ export function amazonPageChallenge(
+   url: string,
+   status: number,
+   html?: string,
+ ): string | undefined {
+-  const host = new URL(url).hostname;
+-  if (host !== 'amazon.ca' && host !== 'www.amazon.ca') return;
++  if (!amazonStore(url)) return;
+   if (status === 202) return 'Amazon verification response (HTTP 202)';
+   if (
+     new URL(url).pathname === '/_sec/verify' ||
+diff --git a/apps/worker/src/parsing/parsers/retailers/amazon.ts b/apps/worker/src/parsing/parsers/retailers/amazon.ts
+index 96dff00..6269e9f 100644
+--- a/apps/worker/src/parsing/parsers/retailers/amazon.ts
++++ b/apps/worker/src/parsing/parsers/retailers/amazon.ts
+@@ -1,14 +1,12 @@
+-import { amazonPageChallenge } from './amazon-page.ts';
++import {
++  amazonPageChallenge,
++  amazonStore,
++  displayedStore,
++  type AmazonStore,
++} from './amazon-page.ts';
+ import type { PageDocument, Product } from '../types.ts';
+ import { all, one, content, textAt, values, htmlDocument, type HtmlNode } from '../shared/html.ts';
+-import {
+-  requireValue,
+-  check,
+-  checkLoaded,
+-  imageUrls,
+-  merchantUrl,
+-  parseRetailer,
+-} from '../shared/retailer.ts';
++import { requireValue, check, checkLoaded, imageUrls, parseRetailer } from '../shared/retailer.ts';
+ import { displayedMinorUnits } from '../money.ts';
+ import {
+   conditionInText,
+@@ -21,7 +19,8 @@ import {
+ import type { Condition, Offer, OfferSummary, Promotion } from '../types.ts';
+ 
+ function asin(value: string): string {
+-  const url = merchantUrl(value, 'amazon.ca');
++  const url = new URL(value);
++  requireValue(amazonStore(value), 'Unsupported merchant URL');
+   return requireValue(
+     /\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})(?:\/|$)/i
+       .exec(url.pathname)?.[1]
+@@ -58,18 +57,14 @@ function labels(root: HtmlNode, selector: string): string[] {
+     ),
+   ];
+ }
+-function uniquePrice(labels: string[], required: boolean): number | undefined {
++function uniquePrice(labels: string[], required: boolean, store: AmazonStore): number | undefined {
+   if (!labels.length && !required) return;
+   // A price widget still may contain a monthly amount or another currency.
+   check(
+-    labels.every((value) =>
+-      /^(?:(?:CAD|CDN|CA|C)?\s*\$\s*|CAD\s+)?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?(?:\s*CAD)?$/.test(
+-        value,
+-      ),
+-    ),
+-    'Amazon price label is not a full CAD amount',
++    labels.every((value) => store.price.test(value)),
++    `Amazon price label is not a full ${store.currency} amount`,
+   );
+-  const amounts = labels.map((value) => displayedMinorUnits(value, 'CAD'));
++  const amounts = labels.map((value) => displayedMinorUnits(value, store.currency));
+   check(
+     amounts.length && amounts.every((v) => v !== undefined) && new Set(amounts).size === 1,
+     'Amazon price missing, ambiguous, or not a product amount',
+@@ -262,7 +257,7 @@ function reference(scopes: HtmlNode[]) {
+   return undefined;
+ }
+ /** Counted but unlisted offers: "Compare New (3) from $699.99" (mobile) or "New & Used (5) from $45.00". */
+-function offerSummary(root: HtmlNode): OfferSummary | undefined {
++function offerSummary(root: HtmlNode, store: AmazonStore): OfferSummary | undefined {
+   const link =
+     all(root, '#olpLinkWidget_feature_div a[href*="/gp/offer-listing/"]').find((n) => !hidden(n)) ??
+     all(root, '#aod-ingress-link, #olp_feature_div a').find((n) => !hidden(n));
+@@ -271,7 +266,8 @@ function offerSummary(root: HtmlNode): OfferSummary | undefined {
+   const counted = /\b(new\s*&\s*used|new|used|renewed|refurbished)\s*\((\d+)\)/i.exec(words);
+   if (!counted) return;
+   const price = all(link, '.a-price .a-offscreen').map(content).find(Boolean);
+-  const fromMinor = price ? displayedMinorUnits(price, 'CAD') : undefined;
++  const fromMinor =
++    price && store.price.test(price) ? displayedMinorUnits(price, store.currency) : undefined;
+   const lead = /^(.*?\(\d+\)(?:\s+from)?)/i.exec(words)?.[1] ?? counted[0];
+   const condition = /&/.test(counted[1])
+     ? undefined
+@@ -279,7 +275,7 @@ function offerSummary(root: HtmlNode): OfferSummary | undefined {
+   return {
+     count: +counted[2],
+     ...(condition ? { condition } : {}),
+-    ...(fromMinor ? { fromMinor, currency: 'CAD' } : {}),
++    ...(fromMinor ? { fromMinor, currency: store.currency } : {}),
+     text: price ? `${lead} ${price}` : lead,
+   };
+ }
+@@ -537,7 +533,16 @@ function read(document: PageDocument, issues: string[]): Product {
+   const challenge = amazonPageChallenge(document.url, 200, document.html);
+   check(!challenge, challenge ?? 'Amazon verification page');
+   const requested = asin(document.requestedUrl ?? document.url);
++  const site = requireValue(amazonStore(document.url), 'Unsupported merchant URL');
++  check(
++    site.host === amazonStore(document.requestedUrl ?? document.url)?.host,
++    'Amazon redirected to another storefront',
++  );
+   const root = htmlDocument(requireValue(document.html, 'Amazon requires original HTML'));
++  const store = displayedStore(
++    site,
++    values(root, '#attach-currency-of-preference, #currencyOfPreference', 'value'),
++  );
+   const mobile = !!one(root, '#mobile_buybox_feature_div');
+   // A capture taken before client rendering holds only the page frame.
+   checkLoaded(
+@@ -679,8 +684,8 @@ function read(document: PageDocument, issues: string[]): Product {
+       'value',
+     );
+     check(
+-      [...currencies, ...regionCurrencies].every((v) => v === 'CAD'),
+-      'Amazon display currency conflicts with Canadian storefront',
++      [...currencies, ...regionCurrencies].every((v) => v === store.currency),
++      `Amazon display currency conflicts with the ${store.host} storefront`,
+     );
+     const rowName = region.attribs['data-a-accordion-row-name'];
+     // A Subscribe & Save row shows its first-delivery price (the tiered repeat price is hidden until chosen).
+@@ -703,7 +708,7 @@ function read(document: PageDocument, issues: string[]): Product {
+     check(centers.length <= 1, 'Ambiguous Amazon price center');
+     const center = centers[0];
+     if (center) prices.push(...labels(center, '.apex-pricetopay-value, .apexPriceToPay'));
+-    const current = requireValue(uniquePrice(prices, true), 'Missing Amazon price');
++    const current = requireValue(uniquePrice(prices, true, store), 'Missing Amazon price');
+     const references = labels(
+       region,
+       '.a-text-price:not(.apex-priceperunit-value):not([data-a-color="price"])',
+@@ -716,7 +721,7 @@ function read(document: PageDocument, issues: string[]): Product {
+           '.apex-basisprice-value, table.a-lineitem .a-text-price[data-a-strike="true"]',
+         ),
+       );
+-    const former = uniquePrice(references, false);
++    const former = uniquePrice(references, false, store);
+     check(former == null || former >= current, 'Amazon reference price is below current price');
+     const seller = sellerIn(region);
+     const stock = textAt(region, '#availability') || textAt(region, '#outOfStock');
+@@ -759,12 +764,12 @@ function read(document: PageDocument, issues: string[]): Product {
+       ...(former != null && former > current
+         ? { compareAtAmountMinor: former, compareAtEvidence: `${evidence}/reference-price` }
+         : {}),
+-      currency: 'CAD',
++      currency: store.currency,
+       currencyEvidence:
+         currencies.length || regionCurrencies.length
+           ? '#currencyOfPreference / purchase option'
+-          : 'storefront:amazon.ca',
+-      url: `https://www.amazon.ca/dp/${expected}`,
++          : `storefront:${store.host}`,
++      url: `https://www.${store.host}/dp/${expected}`,
+       seller: seller || undefined,
+       // The struck price's caption and the savings the page states beside it ("-26%") stay on the offer: they
+       // describe its compare-at price, not a separate deal.
+@@ -807,7 +812,7 @@ function read(document: PageDocument, issues: string[]): Product {
+       } catch (error) {
+         issues.push(`Amazon ${entry.type ?? 'other'} offer skipped: ${(error as Error).message}`);
+       }
+-  offers.push(...otherOffers(root, expected, issues));
++  offers.push(...otherOffers(root, expected, issues, store));
+   // Promotions the promotions service lists go to the buying option they name; an unnamed one to the featured offer.
+   for (const { option, promotion: found } of discoveredPromotions(root, expected)) {
+     const target =
+@@ -838,7 +843,7 @@ function read(document: PageDocument, issues: string[]): Product {
+   }
+   const selection = selectedVariant(root, expected);
+   const stars = pageRating(root);
+-  const url = `https://www.amazon.ca/dp/${expected}`;
++  const url = `https://www.${store.host}/dp/${expected}`;
+   const image = one(root, mobile ? '#main-image' : '#landingImage');
+   // The mobile gallery: one carousel item per slide, in order, naming its image even before the slide has loaded
+   // (unloaded slides hold only loader images). Videos are skipped; any image id is served at full size as SL1500.
+@@ -861,7 +866,7 @@ function read(document: PageDocument, issues: string[]): Product {
+     ...(selection ? { variant: selection } : {}),
+     ...(stars ? { rating: stars } : {}),
+     ...productFacts(root),
+-    ...((summary) => (summary ? { offerSummary: summary } : {}))(offerSummary(root)),
++    ...((summary) => (summary ? { offerSummary: summary } : {}))(offerSummary(root, store)),
+     images: imageUrls(
+       [mainImage, ...gallery.filter((src) => !mainId || !src.includes(`/I/${mainId}.`))],
+       url,
+@@ -874,10 +879,15 @@ function read(document: PageDocument, issues: string[]): Product {
+ /**
+  * The "All offers" panel (AOD) when the captured page holds it open: each offer's own condition heading
+  * ("Used - Like New", "Renewed", "New"), price and seller. An offer is kept only when its own add-to-cart names
+- * this ASIN and its price reads as one CAD amount; anything else is skipped, never guessed. The pinned offer
++ * this ASIN and its price reads as one amount in the storefront's currency; anything else is skipped, never guessed. The pinned offer
+  * repeats the featured one and is not read again.
+  */
+-function otherOffers(root: HtmlNode, expected: string, issues: string[]): Offer[] {
++function otherOffers(
++  root: HtmlNode,
++  expected: string,
++  issues: string[],
++  store: AmazonStore,
++): Offer[] {
+   const list = all(root, '#aod-offer-list #aod-offer');
+   const offers: Offer[] = [];
+   list.forEach((node, index) => {
+@@ -886,7 +896,12 @@ function otherOffers(root: HtmlNode, expected: string, issues: string[]): Offer[
+       ...new Set(values(node, 'input[name="items[0.base][asin]"], input[name="ASIN"]', 'value')),
+     ];
+     const heading = textAt(node, '#aod-offer-heading');
+-    const amount = uniquePrice(labels(node, '.a-price:not(.a-text-price)'), true);
++    let amount: number | undefined;
++    try {
++      amount = uniquePrice(labels(node, '.a-price:not(.a-text-price)'), true, store);
++    } catch {
++      amount = undefined;
++    }
+     const condition = /^\s*new\b/i.test(heading) ? 'new' : conditionInText(heading);
+     if (ids.length !== 1 || ids[0] !== expected || amount == null || !condition) {
+       issues.push(`Amazon other offer ${index + 1} skipped: identity, condition or price unclear`);
+@@ -896,9 +911,9 @@ function otherOffers(root: HtmlNode, expected: string, issues: string[]): Offer[
+       textAt(node, '#aod-offer-soldBy a') || textAt(node, '#aod-offer-soldBy .a-col-right');
+     offers.push({
+       amountMinor: amount,
+-      currency: 'CAD',
+-      currencyEvidence: 'storefront:amazon.ca',
+-      url: `https://www.amazon.ca/dp/${expected}`,
++      currency: store.currency,
++      currencyEvidence: `storefront:${store.host}`,
++      url: `https://www.${store.host}/dp/${expected}`,
+       ...(seller ? { seller } : {}),
+       condition,
+       evidence,
+diff --git a/apps/worker/src/parsing/parsers/retailers/ctc.ts b/apps/worker/src/parsing/parsers/retailers/ctc.ts
+new file mode 100644
+index 0000000..4d41090
+--- /dev/null
++++ b/apps/worker/src/parsing/parsers/retailers/ctc.ts
+@@ -0,0 +1,186 @@
++import type { PageDocument, Product, Promotion } from '../types.ts';
++import { all, content, htmlDocument, one, textAt, type HtmlNode } from '../shared/html.ts';
++import {
++  check,
++  checkLoaded,
++  imageUrls,
++  oneOrMany,
++  parseRetailer,
++  record,
++  requireValue,
++  text,
++} from '../shared/retailer.ts';
++import { displayedMinorUnits } from '../money.ts';
++import { promotion, schemaAvailability, schemaCondition } from '../shared/facts.ts';
++
++/**
++ * Canadian Tire Corporation storefronts share one platform (Canadian Tire, SportChek). Their JSON-LD offer price
++ * includes the environmental fee and is missing on some pages, so the price is the rendered buy box's.
++ */
++const CTC_HOSTS = ['canadiantire.ca', 'sportchek.ca'];
++const PDP = /^\/(?:en|fr)\/pdp\/(?:[^/]+-)?(\d{6,10}[a-z]?)\.html$/i;
++
++/** The product code a Canadian Tire / SportChek product URL names ("…-1842143p.html"), else undefined. */
++export function ctcProductCode(value: string): string | undefined {
++  try {
++    const url = new URL(value);
++    if (url.port || url.username || url.password || !['https:', 'http:'].includes(url.protocol))
++      return;
++    if (!CTC_HOSTS.includes(url.hostname.replace(/^www\./, ''))) return;
++    return PDP.exec(url.pathname)?.[1]?.toLowerCase();
++  } catch {
++    return;
++  }
++}
++
++function jsonLd(root: HtmlNode): Record<string, unknown>[] {
++  return all(root, 'script[type="application/ld+json"]').flatMap((script) => {
++    try {
++      return oneOrMany(JSON.parse(content(script))).map(record);
++    } catch {
++      return [];
++    }
++  });
++}
++const isType = (node: Record<string, unknown>, type: string) =>
++  oneOrMany(node['@type']).includes(type);
++const money = (value: string) =>
++  /\$\s?\d/.test(value)
++    ? displayedMinorUnits(value.replace(/^.*?(\$\s?[\d,]+(?:\.\d+)?).*$/, '$1'), 'CAD')
++    : undefined;
++
++/**
++ * Online availability from the buy box: in stock when any way to buy online (pick up, delivery, ship to home)
++ * is available, out of stock when the page says so or none is; otherwise what the JSON-LD offer states.
++ */
++function availability(box: HtmlNode, root: HtmlNode, offer: Record<string, unknown>) {
++  const ways = all(box, '.nl-buy-online__list-item').map((item) => content(item));
++  if (ways.some((way) => /\bavailable\b|\bin stock\b/i.test(way) && !/\bunavailable\b/i.test(way)))
++    return { availability: 'InStock', evidence: '.nl-buy-online__list-item' };
++  const notice = textAt(root, '.nl-buy-online__fulfillment-title');
++  if (
++    (ways.length && ways.every((way) => /\bunavailable\b/i.test(way))) ||
++    /out of stock/i.test(notice)
++  )
++    return { availability: 'OutOfStock', evidence: '.nl-buy-online__fulfillment-title' };
++  const stated = schemaAvailability(offer.availability);
++  return stated ? { availability: stated, evidence: 'jsonLd.offers.availability' } : {};
++}
++
++function read(document: PageDocument, issues: string[]): Product {
++  const code = requireValue(
++    ctcProductCode(document.requestedUrl ?? document.url),
++    'Unsupported Canadian Tire product URL',
++  );
++  check(ctcProductCode(document.url) === code, 'Canadian Tire redirected to a different product');
++  const root = htmlDocument(requireValue(document.html, 'Missing Canadian Tire page HTML'));
++  const heading = textAt(root, 'h1.nl-product__title');
++  const box = one(root, 'div.nl-buy-box');
++  // The buy box renders in the browser; a page read before it is incomplete, not a product without a price.
++  checkLoaded(heading && box, 'Canadian Tire buy box has not rendered');
++  const priceBlock = all(box!, '.nl-price').find((node) => node.parent === box);
++  const shown = priceBlock ? textAt(priceBlock, '.nl-price--charge') : '';
++  const current = requireValue(money(shown), 'Canadian Tire buy box shows no price');
++  const sku = code.replace(/[a-z]$/i, '');
++  const nodes = jsonLd(root);
++  const products = nodes.filter((node) => isType(node, 'Product'));
++  const product =
++    products.find((node) => text(node.sku) === sku) ?? (products.length === 1 ? products[0] : {});
++  const offer = record(oneOrMany(product.offers)[0]);
++  const was = priceBlock
++    ? money(textAt(priceBlock, '.nl-price--was-eco s') || textAt(priceBlock, '.nl-price--was s'))
++    : undefined;
++  const save = priceBlock ? textAt(priceBlock, '.nl-price__save-story-label') : '';
++  const percent = /save\s+(\d{1,2})\s*%/i.exec(save)?.[1];
++  const fee = priceBlock
++    ? /\$\s?[\d,.]+\s+(?:Env\.?|Environmental|Eco)[^$]*?Fee/i.exec(
++        textAt(priceBlock, '.nl-price__eco-fee'),
++      )?.[0]
++    : undefined;
++  // "Sale ends October 15, 2026" with the JSON-LD priceValidUntil instant of that day.
++  const ends = textAt(box!, '.nl-buy-box__sale-end-day-soon-message, [class*="sale-end"]');
++  const until = text(offer.priceValidUntil);
++  const endDay = /sale ends\s+([A-Z][a-z]+ \d{1,2}, \d{4})/i.exec(ends)?.[1];
++  const sameDay =
++    endDay && until && !Number.isNaN(Date.parse(`${endDay} 12:00 UTC`))
++      ? new Date(`${endDay} 12:00 UTC`).toISOString().slice(0, 10) === until.slice(0, 10)
++      : false;
++  const promotions = [
++    endDay && was && was > current
++      ? promotion('sale', 'Sale', '.nl-buy-box__sale-end-day-soon-message', {
++          validUntil: sameDay ? until : undefined,
++        })
++      : undefined,
++  ].filter((p): p is Promotion => !!p);
++  if (endDay && !sameDay)
++    issues.push('Canadian Tire sale end has no matching instant; no countdown');
++  const badges = [
++    ...new Set(
++      all(box!, '.nl-buy-box__badges .nl-tag')
++        .map((tag) => content(tag))
++        .filter(
++          (label) => label && !/^(?:sale|clearance)$/i.test(label) && !/sale ends/i.test(label),
++        ),
++    ),
++  ];
++  const crumbs = nodes.find((node) => isType(node, 'BreadcrumbList'));
++  const categories = oneOrMany(crumbs?.itemListElement)
++    .map(record)
++    .sort((a, b) => Number(a.position) - Number(b.position))
++    .flatMap((item) => {
++      const name = text(item.name);
++      return name && !/^home$/i.test(name) && name !== heading ? [name] : [];
++    });
++  const specifications = all(root, '.nl-specifications-table tr')
++    .flatMap((row) => {
++      const name = textAt(row, 'th');
++      const value = textAt(row, 'td');
++      return name && value ? [{ name, value }] : [];
++    })
++    .slice(0, 30);
++  const images = imageUrls(
++    [
++      ...all(root, '[data-thumbnail-index] img').map((img) => img.attribs.src),
++      ...oneOrMany(product.image),
++    ].map((src) => (typeof src === 'string' ? src.split('?')[0] : src)),
++    document.url,
++  );
++  const stock = availability(box!, root, offer);
++  const host = new URL(document.url).hostname.replace(/^www\./, '');
++  return {
++    url: document.url,
++    title: heading,
++    sku,
++    brand: textAt(root, '.nl-product__brand-label') || text(record(product.brand).name),
++    ...(badges.length ? { badges } : {}),
++    ...(categories.length ? { categories } : {}),
++    ...(specifications.length ? { specifications } : {}),
++    images,
++    offers: [
++      {
++        amountMinor: current,
++        currency: 'CAD',
++        currencyEvidence: `storefront:${host}`,
++        ...(was && was > current
++          ? {
++              compareAtAmountMinor: was,
++              compareAtEvidence: '.nl-price--was',
++              compareAtLabel: 'Was',
++              ...(percent ? { savingsPercent: Number(percent) } : {}),
++            }
++          : {}),
++        ...(schemaCondition(offer.itemCondition)
++          ? { condition: schemaCondition(offer.itemCondition) }
++          : {}),
++        ...(stock.availability ? { availability: stock.availability } : {}),
++        ...(fee ? { fee: fee.replace(/\s+/g, ' ') } : {}),
++        ...(promotions.length ? { promotions } : {}),
++        url: document.url,
++        evidence: 'div.nl-buy-box > .nl-price .nl-price--charge',
++      },
++    ],
++    evidence: 'h1.nl-product__title + div.nl-buy-box',
++  };
++}
++
++export const parseCtcProduct = (document: PageDocument) => parseRetailer('ctc-ca', document, read);
+diff --git a/apps/worker/src/parsing/parsers/retailers/homedepot.ts b/apps/worker/src/parsing/parsers/retailers/homedepot.ts
+new file mode 100644
+index 0000000..3b480cf
+--- /dev/null
++++ b/apps/worker/src/parsing/parsers/retailers/homedepot.ts
+@@ -0,0 +1,181 @@
++import type { PageDocument, Product } from '../types.ts';
++import {
++  check,
++  imageUrls,
++  list,
++  parseRetailer,
++  record,
++  requireValue,
++  text,
++} from '../shared/retailer.ts';
++import { toMinorUnits } from '../money.ts';
++import { rating, variant } from '../shared/facts.ts';
++import { plainHtml } from '../shared/html.ts';
++
++/** A homedepot.ca product URL's 10-digit article code ("/product/<slug>/1001769719", "/produit/…"). */
++export function homeDepotProductId(value: string): string | undefined {
++  try {
++    const url = new URL(value);
++    if (url.port || url.username || url.password || !['https:', 'http:'].includes(url.protocol))
++      return;
++    if (url.hostname.replace(/^www\./, '') !== 'homedepot.ca') return;
++    return /^\/(?:product|produit)\/(?:[^/]+\/)?(\d{10})\/?$/i.exec(url.pathname)?.[1];
++  } catch {
++    return;
++  }
++}
++
++/** The page's server-rendered state (`<script id="hdca-state">`): the catalogue entry for this product only. */
++export function homeDepotStateProduct(state: unknown, productId: string): unknown {
++  const entry = record(record(state)[`product-${productId}`]);
++  // A product that does not exist renders as a skeleton with every field null.
++  return text(entry.code) === productId && text(entry.name) ? entry : undefined;
++}
++
++const STOCK: Record<string, string> = {
++  instock: 'InStock',
++  lowstock: 'LimitedAvailability',
++  limitedstock: 'LimitedAvailability',
++  outofstock: 'OutOfStock',
++  backorder: 'BackOrder',
++  preorder: 'PreOrder',
++  discontinued: 'Discontinued',
++};
++const stockStatus = (value: unknown) =>
++  STOCK[text(record(value).stockLevelStatus)?.toLowerCase() ?? ''];
++
++/**
++ * The localized row for this product (`products-localized-basic` answers a list, one row per product asked for).
++ */
++function localizedRow(value: unknown, productId: string): Record<string, unknown> {
++  const rows = list(value).map(record);
++  const own = rows.filter((row) => [row.productId, row.code].map(text).includes(productId));
++  check(own.length === 1, 'Home Depot localized price does not name this product');
++  return own[0];
++}
++
++function read(document: PageDocument, issues: string[]): Product {
++  const productId = requireValue(
++    homeDepotProductId(document.requestedUrl ?? document.url),
++    'Unsupported Home Depot product URL',
++  );
++  const source = requireValue(document.homeDepot, 'Missing Home Depot product data');
++  check(source.productId === productId, 'Home Depot data is for a different product');
++  const product = record(
++    requireValue(
++      homeDepotStateProduct({ [`product-${productId}`]: source.product }, productId),
++      'Home Depot page has no product entry',
++    ),
++  );
++  const row = localizedRow(source.localized, productId);
++  const optimized = record(row.optimizedPrice);
++  const shown = record(optimized.displayPrice);
++  const status = text(optimized.productStatus) ?? text(row.productStatus);
++  const currency = text(shown.currencyIso) ?? 'CAD';
++  check(currency === 'CAD', 'Home Depot price is not in CAD');
++  // No display price (status "OU" and similar) is no online price at this store: the catalogue price is not one.
++  const amountMinor = requireValue(
++    shown.value == null ? undefined : toMinorUnits(shown.value, currency),
++    `Home Depot shows no online price at store ${source.store}${status ? ` (status ${status})` : ''}`,
++  );
++  check(amountMinor > 0, 'Home Depot price is zero');
++  const was = record(optimized.wasprice).value;
++  const wasMinor = was == null ? undefined : toMinorUnits(was, currency);
++  const percent = /^(\d{1,2})\s*%$/.exec(text(optimized.percentSaving) ?? '')?.[1];
++  // A unit other than "each" is part of what the price buys ("$4.50 /linear foot").
++  const unit = text(shown.unitOfMeasureCode)?.toUpperCase();
++  if (unit && unit !== 'EA')
++    issues.push(`Home Depot price is per ${text(shown.unitOfMeasure) ?? unit}`);
++  const availability = stockStatus(row.stock) ?? stockStatus(product.stock);
++  const crumbs = list(product.breadCrumbs)
++    .map(record)
++    .flatMap((crumb) => {
++      const title = text(crumb.title);
++      return title && crumb.categoryId != null && title !== productId ? [title] : [];
++    });
++  const specifications = [
++    ...(text(product.modelNumber) ? [{ name: 'Model #', value: text(product.modelNumber)! }] : []),
++    ...list(product.classifications)
++      .flatMap((group) => list(record(group).features))
++      .map(record)
++      .flatMap((feature) => {
++        const name = text(feature.name);
++        const value = list(feature.featureValues)
++          .map((v) => text(record(v).value))
++          .filter(Boolean)
++          .join(', ');
++        const symbol = text(record(feature.featureUnit).symbol);
++        return name && value
++          ? [
++              {
++                name,
++                value:
++                  symbol && !value.endsWith(symbol) && !name.includes(symbol)
++                    ? `${value} ${symbol}`
++                    : value,
++              },
++            ]
++          : [];
++      }),
++  ]
++    .filter((spec, i, all) => all.findIndex((s) => s.name === spec.name) === i)
++    .slice(0, 30);
++  const selection = variant(
++    list(product.variantOptionsSorted)
++      .map(record)
++      .map((option) => ({
++        name: option.name,
++        value: record(option.selectedVariantOptionQualifier).value,
++      })),
++    'hdca-state.variantOptionsSorted',
++    productId,
++  );
++  const stars = rating(
++    { value: product.averageRating, scale: 5, count: product.numberOfReviews },
++    'hdca-state.averageRating',
++  );
++  const badges = list(product.badges).flatMap((badge) => {
++    const name = text(badge) ?? text(record(badge).name) ?? text(record(badge).label);
++    return name ? [name] : [];
++  });
++  const url = `https://www.homedepot.ca/${source.lang === 'fr' ? 'produit' : 'product'}/${productId}`;
++  return {
++    url: document.url,
++    title: requireValue(text(product.name), 'Home Depot title is missing'),
++    brand: text(product.manufacturer),
++    sku: productId,
++    description: plainHtml(product.description),
++    ...(selection ? { variant: selection } : {}),
++    ...(stars ? { rating: stars } : {}),
++    ...(badges.length ? { badges } : {}),
++    ...(crumbs.length ? { categories: crumbs } : {}),
++    ...(specifications.length ? { specifications } : {}),
++    images: imageUrls(
++      [...list(product.images), ...list(product.alternateImages)].map((image) => record(image).url),
++      url,
++    ),
++    offers: [
++      {
++        amountMinor,
++        currency,
++        currencyEvidence: 'products-localized-basic.optimizedPrice.displayPrice.currencyIso',
++        ...(wasMinor !== undefined && wasMinor > amountMinor
++          ? {
++              compareAtAmountMinor: wasMinor,
++              compareAtEvidence: 'products-localized-basic.optimizedPrice.wasprice',
++              compareAtLabel: 'Was',
++              ...(percent ? { savingsPercent: Number(percent) } : {}),
++            }
++          : {}),
++        ...(availability ? { availability } : {}),
++        url: document.url,
++        // The price and stock are the store's: Home Depot prices by store.
++        evidence: `products-localized-basic (store ${source.store})`,
++      },
++    ],
++    evidence: `hdca-state product-${productId} + products-localized-basic store ${source.store}`,
++  };
++}
++
++export const parseHomeDepotProduct = (document: PageDocument) =>
++  parseRetailer('homedepot-ca', document, read);
+diff --git a/apps/worker/src/parsing/parsers/retailers/routing.ts b/apps/worker/src/parsing/parsers/retailers/routing.ts
+index b819e12..35c0b32 100644
+--- a/apps/worker/src/parsing/parsers/retailers/routing.ts
++++ b/apps/worker/src/parsing/parsers/retailers/routing.ts
+@@ -1,19 +1,28 @@
+-export type Retailer = 'amazon-ca' | 'bestbuy-ca' | 'newegg-ca' | 'walmart-ca';
++import { amazonStore } from './amazon-page.ts';
++import { ctcProductCode } from './ctc.ts';
++import { homeDepotProductId } from './homedepot.ts';
++
++export type Retailer =
++  'amazon-ca' | 'amazon' | 'bestbuy-ca' | 'newegg-ca' | 'walmart-ca' | 'ctc-ca' | 'homedepot-ca';
+ /** Exact hosts and supported product paths; a tracking query cannot impersonate a merchant. */
+ export function retailerForUrl(value: string): Retailer | undefined {
+   const url = new URL(value);
+   if (url.port || url.username || url.password) return;
+   const host = url.hostname.replace(/^www\./, '');
++  // amazon.ca keeps its own strategy name; other Amazon storefronts (amazon.com, …) share the parser.
+   if (
+-    host === 'amazon.ca' &&
++    amazonStore(value) &&
+     /\/(?:dp|gp\/product|gp\/aw\/d)\/[A-Z0-9]{10}(?:\/|$)/i.test(url.pathname)
+   )
+-    return 'amazon-ca';
++    return host === 'amazon.ca' ? 'amazon-ca' : 'amazon';
+   if (host === 'bestbuy.ca' && /^\/en-ca\/product\/(?:[^/]+\/)?\d{6,9}\/?$/i.test(url.pathname))
+     return 'bestbuy-ca';
+   if (host === 'newegg.ca' && /^\/(?:[A-Za-z0-9-]+\/)?p\/[^/]+\/?$/i.test(url.pathname))
+     return 'newegg-ca';
+   if (host === 'walmart.ca' && /^\/(?:en|fr)\/ip\/(?:[^/]+\/)?[A-Z0-9]+\/?$/i.test(url.pathname))
+     return 'walmart-ca';
++  // Canadian Tire and SportChek share one storefront platform.
++  if (ctcProductCode(value)) return 'ctc-ca';
++  if (homeDepotProductId(value)) return 'homedepot-ca';
+   return undefined;
+ }
+diff --git a/apps/worker/src/parsing/parsers/shared/facts.ts b/apps/worker/src/parsing/parsers/shared/facts.ts
+index 0762f1e..7a56805 100644
+--- a/apps/worker/src/parsing/parsers/shared/facts.ts
++++ b/apps/worker/src/parsing/parsers/shared/facts.ts
+@@ -330,6 +330,9 @@ function canonical(product: Product): Product {
+     const promotions = [...new Map((shown ?? []).map((p) => [`${p.type}\n${p.text}`, p])).values()];
+     return {
+       ...rest,
++      // An offer whose page states no condition grade is a new item (Best Buy, Walmart, JSON-LD stores without
++      // itemCondition, LLM reads).
++      condition: offer.condition ?? ('new' as const),
+       ...(offer.url ? { url: identityUrl(offer.url) } : {}),
+       ...(availability ? { availability } : {}),
+       ...(promotions.length ? { promotions } : {}),
+diff --git a/apps/worker/src/parsing/parsers/types.ts b/apps/worker/src/parsing/parsers/types.ts
+index 2d20a91..e967ec2 100644
+--- a/apps/worker/src/parsing/parsers/types.ts
++++ b/apps/worker/src/parsing/parsers/types.ts
+@@ -9,6 +9,17 @@ export interface PageDocument {
+     target: import('./shopify/store.ts').ShopifyTarget;
+     response: unknown;
+   };
++  /**
++   * Home Depot Canada: the product the page states (its server-rendered catalogue entry) and the store-localized
++   * price and stock the page loads for one store.
++   */
++  homeDepot?: {
++    productId: string;
++    store: string;
++    lang: 'en' | 'fr';
++    product: unknown;
++    localized: unknown;
++  };
+   fetchedAt: string;
+   markdown: string;
+   metadata: Record<string, string[]>;
+diff --git a/apps/worker/src/parsing/parsers/version.ts b/apps/worker/src/parsing/parsers/version.ts
+index d00aca3..3d9777d 100644
+--- a/apps/worker/src/parsing/parsers/version.ts
++++ b/apps/worker/src/parsing/parsers/version.ts
+@@ -1 +1 @@
+-export const PARSER_VERSION = '3.20.0';
++export const PARSER_VERSION = '3.21.0';
+diff --git a/apps/worker/src/parsing/product-parsing.service.ts b/apps/worker/src/parsing/product-parsing.service.ts
+index e3c585f..22c96e3 100644
+--- a/apps/worker/src/parsing/product-parsing.service.ts
++++ b/apps/worker/src/parsing/product-parsing.service.ts
+@@ -6,6 +6,8 @@ import {
+   parseBestBuyProduct,
+   parseNeweggProduct,
+   parseWalmartProduct,
++  parseCtcProduct,
++  parseHomeDepotProduct,
+   productPrompt,
+   normalizeLlmProduct,
+   LLM_PROMPT_VERSION,
+@@ -21,7 +23,7 @@ import { LlmProviders } from './llm-providers.ts';
+ export const FALLBACK_LLM = Symbol('FALLBACK_LLM');
+ 
+ type Strategy = NonNullable<CrawlContext['parsing']>['strategy'];
+-/** Store parsers, tried first. A store without one goes straight to the LLM. */
++/** Store parsers, tried first. A store without one starts with the page's structured data. */
+ const PARSERS: Partial<Record<Strategy, (document: PageDocument) => ParseResult>> = {
+   structured: parseProductDocument,
+   shopify: parseShopifyProduct,
+@@ -29,8 +31,24 @@ const PARSERS: Partial<Record<Strategy, (document: PageDocument) => ParseResult>
+   'bestbuy-ca': parseBestBuyProduct,
+   'newegg-ca': parseNeweggProduct,
+   'walmart-ca': parseWalmartProduct,
++  'ctc-ca': parseCtcProduct,
++  'homedepot-ca': parseHomeDepotProduct,
++  amazon: parseAmazonProduct,
+ };
+ 
++/** Structured data that alone states the product: every product titled, with a priced offer in a currency. */
++function complete(result: ParseResult): boolean {
++  return (
++    result.status === 'parsed' &&
++    result.products.length > 0 &&
++    result.products.every(
++      (product) =>
++        !!product.title &&
++        product.offers.some((offer) => offer.amountMinor > 0 && !!offer.currency),
++    )
++  );
++}
++
+ @Injectable()
+ export class ProductParsingService {
+   constructor(
+@@ -38,7 +56,10 @@ export class ProductParsingService {
+     @Optional() @Inject(FALLBACK_LLM) private readonly fallback?: LlmStrategy,
+   ) {}
+ 
+-  /** Parsing chain: the store's parser, then the LLM when the parser cannot confirm the product. */
++  /**
++   * Parsing chain: the store's parser; then the page's own structured data (JSON-LD / metadata) when it states a
++   * complete product; the LLM only when neither confirms the product.
++   */
+   async parse(
+     document: PageDocument,
+     context: CrawlContext,
+@@ -49,22 +70,42 @@ export class ProductParsingService {
+     if (parsing.strategy === 'llm') return this.llm(document, parsing, archive, timings);
+     const llm = parsing.strategy === 'generic' ? (parsing.llm ?? this.fallback) : this.fallback;
+     const parser = PARSERS[parsing.strategy];
+-    if (!parser) {
+-      if (!llm) throw new Error('No parser or LLM is configured for this page');
+-      return this.llm(document, llm, archive, timings);
++    let best: ParseResult | undefined;
++    if (parser) {
++      const parsed = parser(document);
++      // An unloaded page is read again by the app; nothing else can find a product that is not there yet.
++      if (parsed.status === 'parsed' || parsed.incomplete) return parsed;
++      await archive.artifact('parser-result.json', JSON.stringify(parsed, null, 2));
++      best = parsed;
++    }
++    if (parser !== parseProductDocument) {
++      const structured = parseProductDocument(document);
++      if (complete(structured)) {
++        await archive.artifact('structured-result.json', JSON.stringify(structured, null, 2));
++        return { ...structured, issues: [...(best?.issues ?? []), ...structured.issues] };
++      }
++      if (structured.products.length) {
++        await archive.artifact('structured-result.json', JSON.stringify(structured, null, 2));
++        if (!best?.products.length)
++          best = { ...structured, issues: [...(best?.issues ?? []), ...structured.issues] };
++      } else if (best) best = { ...best, issues: [...best.issues, ...structured.issues] };
++      else best = structured;
++    }
++    if (!llm) {
++      if (!parser && !best?.products.length && parsing.strategy !== 'generic')
++        throw new Error('No parser or LLM is configured for this page');
++      return best!;
+     }
+-    const parsed = parser(document);
+-    // An unloaded page is read again by the app; the LLM cannot find a product that is not there yet.
+-    if (parsed.status === 'parsed' || parsed.incomplete || !llm) return parsed;
+-    await archive.artifact('parser-result.json', JSON.stringify(parsed, null, 2));
+     try {
+       const fallback = await this.llm(document, llm, archive, timings);
+       if (fallback.status === 'parsed') return fallback;
+-      return { ...fallback, issues: [...parsed.issues, ...fallback.issues] };
++      return best?.products.length
++        ? { ...best, issues: [...best.issues, ...fallback.issues.map((issue) => `LLM: ${issue}`)] }
++        : { ...fallback, issues: [...(best?.issues ?? []), ...fallback.issues] };
+     } catch (error) {
+-      // The store parser's partial result is still the best evidence available.
++      // The parsers' partial result is still the best evidence available.
+       const reason = error instanceof Error ? error.message : 'unknown error';
+-      return { ...parsed, issues: [...parsed.issues, `LLM fallback failed: ${reason}`] };
++      return { ...best!, issues: [...best!.issues, `LLM fallback failed: ${reason}`] };
+     }
+   }
+ 
+diff --git a/apps/worker/test/unit/parsing/generic.test.ts b/apps/worker/test/unit/parsing/generic.test.ts
+index a948f0e..2e07992 100644
+--- a/apps/worker/test/unit/parsing/generic.test.ts
++++ b/apps/worker/test/unit/parsing/generic.test.ts
+@@ -78,18 +78,100 @@ async function harness(generate: LlmProvider['generate'] = async () => reply) {
+ }
+ const reply = { provider: 'fixture', model: 'fixture', text: JSON.stringify(output), raw: output };
+ 
+-test('a store without its own parser goes straight to the LLM', async () => {
++test('a store without its own parser uses its complete structured data without the LLM', async () => {
+   const h = await harness();
+   try {
+     const archive = await h.archive();
+-    // Structured data on the page does not replace the LLM when no parser is registered.
+     const result = await h.service().parse(doc, context({ strategy: 'generic', llm }), archive);
+     assert.equal(result.status, 'parsed');
++    assert.equal(result.strategy, 'schema-org');
+     assert.equal(result.products[0].offers[0].amountMinor, 12995);
+-    assert.equal(h.state.calls, 1);
++    assert.equal(h.state.calls, 0);
++    const files = await h.files(archive);
++    assert.ok(files.has('structured-result.json'));
++    assert.ok(!files.has('llm-request.json'));
++  } finally {
++    await h.done();
++  }
++});
++
++test('structured data without a price goes to the LLM; without structured data too', async () => {
++  const h = await harness();
++  try {
++    const unpriced = {
++      ...doc,
++      jsonLd: [{ '@type': 'Product', name: 'Mory Headphones', offers: { '@type': 'Offer' } }],
++    };
++    for (const page of [unpriced, { ...doc, jsonLd: [] }]) {
++      const archive = await h.archive();
++      const result = await h.service().parse(page, context({ strategy: 'generic', llm }), archive);
++      assert.equal(result.status, 'parsed');
++      assert.match(result.strategy, /llm/);
++      assert.equal(result.products[0].offers[0].amountMinor, 12995);
++      assert.ok((await h.files(archive)).has('llm-response.json'));
++    }
++    assert.equal(h.state.calls, 2);
++  } finally {
++    await h.done();
++  }
++});
++
++test('when the LLM cannot confirm or fails, the structured product is kept with the reason', async () => {
++  const unpriced = {
++    ...doc,
++    jsonLd: [{ '@type': 'Product', name: 'Mory Headphones', offers: { '@type': 'Offer' } }],
++  };
++  const unsure = await harness(async () => ({
++    provider: 'fixture',
++    model: 'fixture',
++    text: JSON.stringify({ product: null }),
++    raw: {},
++  }));
++  const broken = await harness(async () => {
++    throw new Error('The operation was aborted due to timeout');
++  });
++  try {
++    const kept = await unsure
++      .service()
++      .parse(unpriced, context({ strategy: 'generic', llm }), await unsure.archive());
++    assert.equal(kept.status, 'needs_review');
++    assert.equal(kept.products[0].title, 'Mory Headphones');
++    assert.ok(kept.issues.some((issue) => /^LLM: /.test(issue)));
++    const failed = await broken
++      .service()
++      .parse(unpriced, context({ strategy: 'generic', llm }), await broken.archive());
++    assert.equal(failed.products[0].title, 'Mory Headphones');
++    assert.ok(failed.issues.some((issue) => /LLM fallback failed/.test(issue)));
++  } finally {
++    await unsure.done();
++    await broken.done();
++  }
++});
++
++test('a generic page without a configured LLM returns its structured result', async () => {
++  const h = await harness();
++  try {
++    const result = await h
++      .service()
++      .parse({ ...doc, jsonLd: [] }, context({ strategy: 'generic' }), await h.archive());
++    assert.equal(result.status, 'needs_review');
++    assert.equal(h.state.calls, 0);
++  } finally {
++    await h.done();
++  }
++});
++
++test('a store parser that cannot confirm the product is followed by complete structured data', async () => {
++  const h = await harness();
++  try {
++    const archive = await h.archive();
++    // A Shopify page with no selected variant (Frank And Oak) whose JSON-LD states the product.
++    const result = await h.service(llm).parse(doc, context({ strategy: 'shopify' }), archive);
++    assert.equal(result.status, 'parsed');
++    assert.equal(result.strategy, 'schema-org');
++    assert.equal(h.state.calls, 0);
+     const files = await h.files(archive);
+-    assert.ok(files.has('llm-request.json') && files.has('llm-response.json'));
+-    assert.ok(!files.has('parser-result.json'));
++    assert.ok(files.has('parser-result.json') && files.has('structured-result.json'));
+   } finally {
+     await h.done();
+   }
+diff --git a/apps/worker/test/unit/parsing/parsers/conditions.test.ts b/apps/worker/test/unit/parsing/parsers/conditions.test.ts
+index 27b4ce2..a1dd7d0 100644
+--- a/apps/worker/test/unit/parsing/parsers/conditions.test.ts
++++ b/apps/worker/test/unit/parsing/parsers/conditions.test.ts
+@@ -81,7 +81,7 @@ test('real captured Amazon pages keep one featured new offer', () => {
+   }
+ });
+ 
+-test('the stored first offer is new whenever the page has a new offer', () => {
++test('the stored first offer is new whenever the page has a new offer; no stated grade is new', () => {
+   const offer = (condition: 'new' | 'used' | 'renewed' | undefined, amountMinor: number) => ({
+     amountMinor,
+     currency: 'CAD',
+@@ -107,7 +107,7 @@ test('the stored first offer is new whenever the page has a new offer', () => {
+   assert.deepEqual(
+     result.products[0].offers.map((o) => [o.condition, o.amountMinor]),
+     [
+-      [undefined, 900],
++      ['new', 900],
+       ['used', 500],
+       ['renewed', 600],
+     ],
+diff --git a/packages/capture-contracts/src/task.ts b/packages/capture-contracts/src/task.ts
+index 7d3cab6..eb2b197 100644
+--- a/packages/capture-contracts/src/task.ts
++++ b/packages/capture-contracts/src/task.ts
+@@ -47,7 +47,8 @@ const common = {
+     .strict()
+     .optional(),
+ };
+-export const AcquisitionStepSchema = z.discriminatedUnion("mode", [
++/** A store's own public product API, read over plain HTTP. */
++const ApiStepSchema = z.discriminatedUnion("provider", [
+   z
+     .object({
+       mode: z.literal("api"),
+@@ -61,6 +62,19 @@ export const AcquisitionStepSchema = z.discriminatedUnion("mode", [
+       network: common.network,
+     })
+     .strict(),
++  // Home Depot Canada prices by store: the page, then that store's localized price and stock for its product.
++  z
++    .object({
++      mode: z.literal("api"),
++      provider: z.literal("homedepot-ca"),
++      store: z.string().regex(/^\d{4}$/),
++      timeoutMs: common.timeoutMs,
++      network: common.network,
++    })
++    .strict(),
++]);
++export const AcquisitionStepSchema = z.discriminatedUnion("mode", [
++  ApiStepSchema,
+   z.object({ mode: z.literal("http"), ...common }).strict(),
+   z
+     .object({
+@@ -123,9 +137,12 @@ export const CrawlContextSchema = z
+         z.object({ strategy: z.literal("structured") }).strict(),
+         z.object({ strategy: z.literal("shopify") }).strict(),
+         z.object({ strategy: z.literal("amazon-ca") }).strict(),
++        z.object({ strategy: z.literal("amazon") }).strict(),
+         z.object({ strategy: z.literal("bestbuy-ca") }).strict(),
+         z.object({ strategy: z.literal("newegg-ca") }).strict(),
+         z.object({ strategy: z.literal("walmart-ca") }).strict(),
++        z.object({ strategy: z.literal("ctc-ca") }).strict(),
++        z.object({ strategy: z.literal("homedepot-ca") }).strict(),
+         LlmStrategySchema,
+         z
+           .object({
+@@ -164,15 +181,22 @@ export const CrawlContextSchema = z
+       context.acquisition,
+       ...context.fallback.map((f) => f.acquisition),
+     ];
+-    if (
+-      steps.some((step) => step.mode === "api") &&
+-      context.parsing?.strategy !== "shopify"
+-    )
+-      ctx.addIssue({
+-        code: "custom",
+-        path: ["parsing"],
+-        message: "Shopify API acquisition requires the Shopify parser",
+-      });
++    for (const step of steps)
++      if (
++        step.mode === "api" &&
++        context.parsing?.strategy !==
++          (step.provider === "shopify" ? "shopify" : "homedepot-ca")
++      ) {
++        ctx.addIssue({
++          code: "custom",
++          path: ["parsing"],
++          message:
++            step.provider === "shopify"
++              ? "Shopify API acquisition requires the Shopify parser"
++              : "Home Depot API acquisition requires the Home Depot parser",
++        });
++        return;
++      }
+   });
+ /** Automatic intent and executable context are separate contracts. */
+ export const AutoContextSchema = z

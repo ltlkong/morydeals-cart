@@ -1,0 +1,31 @@
+diff -ruN a/packages/ui/src/mory/parts/face.tsx b/packages/ui/src/mory/parts/face.tsx
+--- a/packages/ui/src/mory/parts/face.tsx	2026-10-10 02:02:16.000000000 -0700
++++ b/packages/ui/src/mory/parts/face.tsx	2026-10-10 02:05:41.381812736 -0700
+@@ -37,19 +37,17 @@
+   if (expression === "surprised")
+     return (
+       <>
+-        {/* Wow: brows up, round wide eyes with a glint, and a small round open mouth set high enough to clear held props. */}
+-        <Path
+-          d="M72 96 Q80 89 89 94 M111 94 Q120 89 128 96"
++        {/* Wow: the neutral eyes a little larger, and a small "o" drawn with the same line as the other faces. */}
++        <Ellipse cx={82} cy={118} rx={6} ry={10.5} fill={eye} />
++        <Ellipse cx={118} cy={118} rx={6} ry={10.5} fill={eye} />
++        <Circle
++          cx={100}
++          cy={136}
++          r={3.6}
+           fill="none"
+           stroke={eye}
+-          strokeWidth={4}
+-          strokeLinecap="round"
++          strokeWidth={4.5}
+         />
+-        <Circle cx={82} cy={110} r={7.5} fill={eye} />
+-        <Circle cx={118} cy={110} r={7.5} fill={eye} />
+-        <Circle cx={84.6} cy={107.4} r={2.3} fill={MORY_COLORS.body} />
+-        <Circle cx={120.6} cy={107.4} r={2.3} fill={MORY_COLORS.body} />
+-        <Ellipse cx={100} cy={120} rx={4.2} ry={5.2} fill={eye} />
+       </>
+     );
+   if (expression === "worried")

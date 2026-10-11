@@ -1,0 +1,8 @@
+[
+  {
+    "id": "docker_camoufox",
+    "engine": "firefox",
+    "transport": "playwright",
+    "endpointEnv": "DOCKER_CAMOUFOX_WS"
+  }
+]

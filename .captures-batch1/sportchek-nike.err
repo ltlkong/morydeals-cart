@@ -1,0 +1,62 @@
+When using a proxy, it is heavily recommended that you pass `geoip=True`. at file:///Users/tielinli/Workspace/morydeals-cart/node_modules/camoufox-js/dist/warnings.js:21
+{
+  "status": "failed",
+  "auditId": "product-page/2026-10-11/www.sportchek.ca/daefc6113c5c1293/9c40f1c5-d3a0-4d80-b4a5-34702f5165ff--5ef6802d-5209-4b02-bc9c-05276bd6df44",
+  "timings": {
+    "scope": "failed",
+    "totalMs": 20137.747,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 57.739,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 392.56,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 19613.464,
+        "status": "failed"
+      },
+      "archive": {
+        "durationMs": 57.139,
+        "status": "completed"
+      },
+      "databaseFailure": {
+        "durationMs": 14.194,
+        "status": "completed"
+      }
+    }
+  },
+  "reason": "incomplete",
+  "acquisition": {
+    "version": 1,
+    "status": "incomplete",
+    "reason": "incomplete",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:48:00.520Z",
+        "completedAt": "2026-10-11T01:48:00.539Z",
+        "durationMs": 18.344,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing",
+        "captureFile": "response-0.body"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:48:00.539Z",
+        "completedAt": "2026-10-11T01:48:20.133Z",
+        "durationMs": 19594.5,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing"
+      }
+    ]
+  },
+  "error": "A single primary product heading is missing"
+}

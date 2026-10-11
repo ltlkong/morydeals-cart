@@ -1,0 +1,15 @@
+node_modules/
+.local/
+.expo/
+dist/
+web-build/
+ios/
+android/
+.DS_Store
+*.log
+apps/worker/src/generated/
+.env
+.env.*
+!.env.example
+apps/api/src/generated/
+apps/worker/storage/

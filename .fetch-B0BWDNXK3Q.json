@@ -1,0 +1,100 @@
+{
+  "taskId": "c18717ab-9fa7-406b-a66c-dea4f56edabd",
+  "attemptId": "67ba4265-2db3-42f2-84e8-f87b0960e6bd",
+  "status": "ready",
+  "auditId": "product-page/2026-10-11/www.amazon.ca/9030cf35123a8d2c/c18717ab-9fa7-406b-a66c-dea4f56edabd--67ba4265-2db3-42f2-84e8-f87b0960e6bd",
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:29:31.823Z",
+        "completedAt": "2026-10-11T01:29:33.895Z",
+        "durationMs": 2071.641,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "amazon-ca",
+    "evidence": [
+      "url:www.amazon.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "selector": "#productTitle"
+        }
+      },
+      "parsing": {
+        "strategy": "amazon-ca"
+      },
+      "fallback": [
+        {
+          "on": [
+            "blocked",
+            "incomplete",
+            "http_error",
+            "unsupported_content"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "selector": "#productTitle"
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 2184.356,
+    "stages": {
+      "decision": {
+        "durationMs": 0.995,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 2073.432,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 7.771,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 79.982,
+        "status": "completed"
+      }
+    }
+  }
+}

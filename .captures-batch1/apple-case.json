@@ -1,0 +1,128 @@
+{
+  "taskId": "3669fd50-c6f7-49dc-9cee-198b35ea964f",
+  "attemptId": "e74be69f-49a8-42e2-9b7f-8343873ccc99",
+  "status": "needs_review",
+  "auditId": "product-page/2026-10-11/www.apple.com/4c42dcbf480157db/3669fd50-c6f7-49dc-9cee-198b35ea964f--e74be69f-49a8-42e2-9b7f-8343873ccc99",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "needs_review",
+    "products": [],
+    "issues": [
+      "No product identified"
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:47:22.594Z",
+        "completedAt": "2026-10-11T01:47:22.614Z",
+        "durationMs": 19.817,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-1.body"
+      }
+    ],
+    "selectedCapture": 1
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 56947,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 4912.406,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 55.007,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 3059.84,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 20.456,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 21.587,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 1712.925,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 32.037,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 7.253,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 2752,
+      "outputTokens": 89,
+      "requestMs": 1711.203
+    }
+  }
+}

@@ -1,0 +1,169 @@
+{
+  "taskId": "cb2867ec-851f-433a-a65b-57aba57736f3",
+  "attemptId": "26a326a4-3d05-4382-ab3f-29e322446358",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.canadiantire.ca/4f98d4ba1f97fa31/cb2867ec-851f-433a-a65b-57aba57736f3--26a326a4-3d05-4382-ab3f-29e322446358",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "parsed",
+    "issues": [],
+    "products": [
+      {
+        "url": "https://www.canadiantire.ca/en/pdp/proform-carbon-tlx-treadmill-ifit-enabled-1842143p.html",
+        "title": "ProForm Carbon TLX Treadmill, iFIT® Enabled",
+        "brand": "ProForm",
+        "sku": "PFTL90924C",
+        "images": [
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-e6be3942-e26e-4314-80d8-5ddf76fdfa52-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-bed36a44-8839-4825-8a11-f93d30bc477e-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-0f9b8421-2b2a-4fc1-a202-40b9524455af-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-a6dd2508-618f-405c-afb2-5d83165c2642-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-b2ccdc6f-fd54-4795-850f-0ae25dc3e85c-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-7ecd4421-083d-4a2d-b5fa-def25db493a8-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-83cfd41f-77e9-4be0-a9e7-716240ddaf25-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-09b40e5e-69d8-49be-b81e-3a9a403ff083-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-602d839a-eeb8-4adf-b390-87a5b2ab1bf3-jpgrendition.jpg",
+          "https://media-www.canadiantire.ca/product/playing/exercise/cardio-equipment-accessories/1842143/proform-tlx-treadmill-2bfdf1e5-dc56-47da-b8fe-52f98111d315-jpgrendition.jpg"
+        ],
+        "offers": [
+          {
+            "amountMinor": 99999,
+            "compareAtAmountMinor": 139999,
+            "compareAtEvidence": "price was $1,399.99",
+            "currency": "CAD",
+            "currencyEvidence": "storefront:www.canadiantire.ca",
+            "url": "https://www.canadiantire.ca/en/pdp/proform-carbon-tlx-treadmill-ifit-enabled-1842143p.html",
+            "evidence": "$999.99"
+          }
+        ],
+        "evidence": "page.md"
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:46:21.498Z",
+        "completedAt": "2026-10-11T01:46:21.519Z",
+        "durationMs": 20.862,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing",
+        "captureFile": "response-0.body"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:46:21.519Z",
+        "completedAt": "2026-10-11T01:46:27.870Z",
+        "durationMs": 6350.796,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-2.body"
+      }
+    ],
+    "selectedCapture": 2
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 59741,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 13912.849,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 54.34,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 268.974,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 6372.325,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 43.537,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 7064.301,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 80.576,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 25.022,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 11502,
+      "outputTokens": 1799,
+      "requestMs": 7060.558
+    }
+  }
+}

@@ -1,0 +1,841 @@
+diff --git a/apps/mobile/src/ShoppingScreen.tsx b/apps/mobile/src/ShoppingScreen.tsx
+index 5cc90e6..9c727df 100644
+--- a/apps/mobile/src/ShoppingScreen.tsx
++++ b/apps/mobile/src/ShoppingScreen.tsx
+@@ -11,12 +11,6 @@ import {
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+ import Animated from "react-native-reanimated";
+ import * as Haptics from "expo-haptics";
+-import {
+-  Compass,
+-  ShoppingBag,
+-  ListChecks,
+-  UserRound,
+-} from "lucide-react-native";
+ import {
+   Brand,
+   Button,
+@@ -27,7 +21,6 @@ import {
+   MoryLookProvider,
+   useCompactOnScroll,
+   floatingTabBarSpace,
+-  LogoCarousel,
+   Mory,
+   MoryField,
+   PageFade,
+@@ -35,7 +28,6 @@ import {
+   colors,
+   radius,
+   useMinimumRefresh,
+-  type DockNavigationItem,
+ } from "@morydeals/ui";
+ import { AccountScreen } from "./account/AccountScreen";
+ import { HistoryScreen } from "./account/HistoryScreen";
+@@ -45,7 +37,7 @@ import { CartPage } from "./cart/CartPage";
+ import { CartModal } from "./cart/CartModal";
+ import { CartEditBar } from "./cart/CartEditBar";
+ import { selectAll, toggleSelected } from "./cart/cart-selection";
+-import { MerchantPicker, type BrowserTarget } from "./merchants/MerchantPicker";
++import type { BrowserTarget } from "./merchants/MerchantPicker";
+ import { MerchantBrowser } from "./merchants/MerchantBrowser";
+ import { useMerchants } from "./merchants/use-merchants";
+ import { addToCart, removeFromCart } from "./cart/cart-api";
+@@ -60,44 +52,12 @@ import { ListPicker } from "./lists/ListPicker";
+ import { useLists } from "./lists/use-lists";
+ import type { ListSummary } from "./lists/lists-api";
+ import { useProducts } from "./use-products";
+-/** While Browse is not the open page, its icon cycles through the stores' logos. */
+-const navigationItems = (logos: string[]): DockNavigationItem[] => [
+-  {
+-    key: "browse",
+-    label: "Browse stores",
+-    title: "Browse",
+-    icon: (selected) =>
+-      selected || !logos.length ? (
+-        <Compass size={20} color={selected ? colors.accent : colors.ink} />
+-      ) : (
+-        <LogoCarousel uris={logos} size={22} />
+-      ),
+-  },
+-  {
+-    key: "cart",
+-    label: "Your cart",
+-    title: "Cart",
+-    icon: (selected) => (
+-      <ShoppingBag size={20} color={selected ? colors.accent : colors.ink} />
+-    ),
+-  },
+-  {
+-    key: "lists",
+-    label: "Your lists",
+-    title: "List",
+-    icon: (selected) => (
+-      <ListChecks size={20} color={selected ? colors.accent : colors.ink} />
+-    ),
+-  },
+-  {
+-    key: "account",
+-    label: "Your account",
+-    title: "Account",
+-    icon: (selected) => (
+-      <UserRound size={20} color={selected ? colors.accent : colors.ink} />
+-    ),
+-  },
+-];
++import { useLocalState } from "./use-local-state";
++import { navigationItems } from "./navigation/navigation-items";
++import { BrowseScreen } from "./browse/BrowseScreen";
++import { continueTargets, showIntro, touchRecent } from "./browse/home-state";
++const isBoolean = (value: unknown): value is boolean =>
++  typeof value === "boolean";
+ const tick = () => {
+   void Haptics.selectionAsync().catch(() => undefined);
+ };
+@@ -115,12 +75,15 @@ export function ShoppingScreen() {
+     null,
+   );
+   const [browserSessions, setBrowserSessions] = useState<BrowserTarget[]>([]);
++  // Store tabs by when they were last opened, for Browse's Continue shopping (sessions keep their mount order).
++  const [recentStores, setRecentStores] = useState<string[]>([]);
+   const openBrowser = useCallback((target: BrowserTarget) => {
+     setBrowserSessions((sessions) =>
+       sessions.some((item) => item.url === target.url)
+         ? sessions
+         : [...sessions, target],
+     );
++    setRecentStores((recent) => touchRecent(recent, target.url));
+     setBrowser(target);
+     setBrowserResume(target);
+   }, []);
+@@ -329,6 +292,29 @@ export function ShoppingScreen() {
+     return true;
+   };
+   const available = Math.min(width - 32, 700);
++  const intro = useLocalState("browse.intro.dismissed.v1", false, isBoolean);
++  const setIntroDismissed = intro.setValue;
++  const dismissIntro = useCallback(
++    () => setIntroDismissed(true),
++    [setIntroDismissed],
++  );
++  // Browse is memoized; its composer reaches the latest send through a ref, like the store browsers' capture.
++  const sendRef = useRef(send);
++  sendRef.current = send;
++  const sendFromBrowse = useCallback(
++    (text: string) => sendRef.current(text),
++    [],
++  );
++  const resumable = useMemo(
++    () => continueTargets(browserSessions, recentStores),
++    [browserSessions, recentStores],
++  );
++  const firstRun = showIntro({
++    cartReady: ready,
++    cartCount: products.length,
++    dismissedReady: intro.ready,
++    dismissed: intro.value,
++  });
+   return (
+     <MoryLookProvider look={mory.look}>
+       <View style={s.root}>
+@@ -408,16 +394,22 @@ export function ShoppingScreen() {
+           >
+             <PageFade page={page} style={{ width: available }}>
+               <View
+-                style={[
+-                  s.merchantList,
+-                  { display: page === "browse" ? "flex" : "none" },
+-                ]}
++                style={{
++                  width: "100%",
++                  display: page === "browse" ? "flex" : "none",
++                }}
+               >
+-                <MerchantPicker
++                <BrowseScreen
++                  width={available}
+                   catalog={merchants.catalog}
+-                  error={merchants.error}
+-                  onReload={merchants.reload}
+-                  onOpen={openBrowser}
++                  catalogError={merchants.error}
++                  reloadCatalog={merchants.reload}
++                  openStore={openBrowser}
++                  resumable={resumable}
++                  send={sendFromBrowse}
++                  messages={messages}
++                  firstRun={firstRun}
++                  dismissIntro={dismissIntro}
+                 />
+               </View>
+               {/* Every page stays mounted: switching only shows it, so no views are created mid-animation. */}
+@@ -584,7 +576,6 @@ const s = StyleSheet.create({
+     justifyContent: "space-between",
+   },
+   body: { flex: 1, position: "relative" },
+-  merchantList: { paddingTop: 16 },
+   content: {
+     paddingTop: 4,
+     paddingHorizontal: 16,
+diff --git a/apps/mobile/src/browse/BrowseScreen.tsx b/apps/mobile/src/browse/BrowseScreen.tsx
+new file mode 100644
+index 0000000..31a1fe5
+--- /dev/null
++++ b/apps/mobile/src/browse/BrowseScreen.tsx
+@@ -0,0 +1,18 @@
++import { memo } from "react";
++import { StyleSheet, View } from "react-native";
++import { HOME_SECTIONS, type HomeContext } from "./HomeSections";
++
++/** The Browse tab: the home page, built from the section registry. Stores only, no products. */
++export const BrowseScreen = memo(function BrowseScreen(context: HomeContext) {
++  return (
++    <View style={s.root}>
++      {HOME_SECTIONS.filter((section) => section.visible(context)).map(
++        ({ key, Section }) => (
++          <Section key={key} {...context} />
++        ),
++      )}
++    </View>
++  );
++});
++
++const s = StyleSheet.create({ root: { paddingTop: 16, gap: 22 } });
+diff --git a/apps/mobile/src/browse/HomeSections.tsx b/apps/mobile/src/browse/HomeSections.tsx
+new file mode 100644
+index 0000000..2a988b5
+--- /dev/null
++++ b/apps/mobile/src/browse/HomeSections.tsx
+@@ -0,0 +1,277 @@
++import { useState, type ComponentType, type ReactNode } from "react";
++import { Image, StyleSheet, View } from "react-native";
++import { useSharedValue } from "react-native-reanimated";
++import { X } from "lucide-react-native";
++import {
++  Copy,
++  DockInput,
++  MoryAvatar,
++  Pressable,
++  SearchField,
++  colors,
++  radius,
++  type ChatMessage,
++} from "@morydeals/ui";
++import type { MerchantCatalog } from "../merchants/merchants-api";
++import {
++  MerchantPicker,
++  type BrowserTarget,
++} from "../merchants/MerchantPicker";
++import { storeLabel } from "./home-state";
++
++/** Everything a Browse section may read; each section picks what it needs. */
++export type HomeContext = {
++  width: number;
++  catalog: MerchantCatalog | null;
++  catalogError: string;
++  reloadCatalog: () => void;
++  openStore: (target: BrowserTarget) => void;
++  /** Open store tabs to offer again, the most recent first (see continueTargets). */
++  resumable: readonly BrowserTarget[];
++  /** The same send as the store browser's dock: a link is captured, anything else gets Mory's reply. */
++  send: (text: string) => boolean;
++  messages: readonly ChatMessage[];
++  /** No product yet and the intro not dismissed. */
++  firstRun: boolean;
++  dismissIntro: () => void;
++};
++
++export type HomeSection = {
++  key: string;
++  /** Hidden sections render nothing, not even their gap. */
++  visible: (context: HomeContext) => boolean;
++  Section: ComponentType<HomeContext>;
++};
++
++function SectionHeader({ children }: { children: ReactNode }) {
++  return (
++    <Copy weight="extra" accessibilityRole="header" style={s.sectionTitle}>
++      {children}
++    </Copy>
++  );
++}
++
++/** Paste a link or ask Mory: the store browser's dock input and send, folded into the page. */
++function AskMorySection({ send, messages, firstRun }: HomeContext) {
++  const keystrokes = useSharedValue(0);
++  // Only a reply to something sent from here is shown under the field.
++  const [sentAt, setSentAt] = useState<number | null>(null);
++  const reply =
++    sentAt === null
++      ? undefined
++      : messages.slice(sentAt).findLast((m) => m.role === "assistant");
++  return (
++    <View style={s.ask}>
++      {firstRun ? (
++        <View style={s.intro}>
++          <Copy weight="extra" accessibilityRole="header" style={s.title}>
++            Pick a store to start.
++          </Copy>
++          <Copy tone="muted">Shop as usual. Mory watches prices for you.</Copy>
++        </View>
++      ) : null}
++      <View style={s.composer}>
++        <DockInput
++          onSend={(text) => {
++            const at = messages.length;
++            const sent = send(text);
++            if (sent) setSentAt(at);
++            return sent;
++          }}
++          onFocused={() => undefined}
++          onHasDraft={() => undefined}
++          keystrokes={keystrokes}
++          placeholder="Paste a link or ask Mory…"
++        />
++      </View>
++      {reply ? (
++        <View style={s.reply} accessibilityLiveRegion="polite">
++          <MoryAvatar size="sm" />
++          <Copy style={s.replyText}>{reply.text}</Copy>
++        </View>
++      ) : null}
++    </View>
++  );
++}
++
++function IntroSection({ dismissIntro }: HomeContext) {
++  return (
++    <View style={s.strip}>
++      <MoryAvatar size="sm" />
++      <Copy style={s.stripText}>
++        New here? Open a store, tap Mory and choose{" "}
++        <Copy weight="extra" style={s.stripText}>
++          Capture this product
++        </Copy>
++        . Mory tells you when the price drops.
++      </Copy>
++      <Pressable
++        accessibilityRole="button"
++        accessibilityLabel="Dismiss the intro"
++        hitSlop={8}
++        onPress={dismissIntro}
++        style={s.stripClose}
++      >
++        <X size={16} color={colors.muted} />
++      </Pressable>
++    </View>
++  );
++}
++
++function StoreMark({ target }: { target: BrowserTarget }) {
++  return (
++    <View style={s.mark}>
++      {target.logoUrl ? (
++        <Image
++          accessibilityIgnoresInvertColors
++          source={{ uri: target.logoUrl }}
++          resizeMode="contain"
++          style={s.markImage}
++        />
++      ) : (
++        <Copy weight="extra" style={s.markText}>
++          {storeLabel(target.name).slice(0, 2).toUpperCase()}
++        </Copy>
++      )}
++    </View>
++  );
++}
++
++/** The store tabs still open behind Browse, so a round trip lands back on the same page. */
++function ContinueSection({ resumable, openStore }: HomeContext) {
++  return (
++    <View style={s.section}>
++      <SectionHeader>Continue shopping</SectionHeader>
++      {resumable.map((target) => (
++        <Pressable
++          key={target.url}
++          accessibilityRole="button"
++          accessibilityLabel={`Resume ${storeLabel(target.name)}`}
++          onPress={() => openStore(target)}
++          style={s.resume}
++        >
++          <StoreMark target={target} />
++          <View style={{ flex: 1 }}>
++            <Copy weight="extra" numberOfLines={1}>
++              Continue at {storeLabel(target.name)}
++            </Copy>
++            <Copy tone="muted" style={s.caption}>
++              Open tab
++            </Copy>
++          </View>
++          <Copy weight="extra" tone="accentInk" style={s.caption}>
++            Resume
++          </Copy>
++        </Pressable>
++      ))}
++    </View>
++  );
++}
++
++/** The main content: every store, a search over them, and any other store by link. */
++function StoresSection({
++  catalog,
++  catalogError,
++  reloadCatalog,
++  openStore,
++  width,
++}: HomeContext) {
++  const [query, setQuery] = useState("");
++  return (
++    <View style={s.section}>
++      <SectionHeader>All stores</SectionHeader>
++      {catalog ? (
++        <SearchField
++          value={query}
++          onChangeText={setQuery}
++          placeholder="Find a store"
++          clearLabel="Clear store search"
++        />
++      ) : null}
++      <MerchantPicker
++        catalog={catalog}
++        error={catalogError}
++        onReload={reloadCatalog}
++        onOpen={openStore}
++        query={query}
++        width={width}
++      />
++    </View>
++  );
++}
++
++/**
++ * Browse, top to bottom. Adding a section (e.g. Deals) is one entry here; category chips and per-store coupon
++ * counts wait for the merchants API to carry them.
++ */
++export const HOME_SECTIONS: readonly HomeSection[] = [
++  { key: "ask", visible: () => true, Section: AskMorySection },
++  { key: "intro", visible: (c) => c.firstRun, Section: IntroSection },
++  {
++    key: "continue",
++    visible: (c) => c.resumable.length > 0,
++    Section: ContinueSection,
++  },
++  { key: "stores", visible: () => true, Section: StoresSection },
++];
++
++const s = StyleSheet.create({
++  ask: { gap: 10 },
++  intro: { gap: 2, paddingTop: 4 },
++  title: { fontSize: 24, lineHeight: 30 },
++  composer: { flexDirection: "row", height: 48 },
++  reply: {
++    flexDirection: "row",
++    alignItems: "flex-start",
++    gap: 8,
++    padding: 10,
++    borderRadius: radius.md,
++    backgroundColor: colors.surface,
++    borderWidth: 1,
++    borderColor: colors.line,
++  },
++  replyText: { flex: 1, fontSize: 14, lineHeight: 20 },
++  strip: {
++    flexDirection: "row",
++    alignItems: "center",
++    gap: 10,
++    paddingVertical: 10,
++    paddingLeft: 10,
++    paddingRight: 8,
++    borderRadius: radius.md,
++    backgroundColor: colors.accentSoft,
++    borderWidth: 1,
++    borderColor: colors.chipLine,
++  },
++  stripText: { flex: 1, fontSize: 13, lineHeight: 18 },
++  stripClose: {
++    width: 28,
++    height: 28,
++    alignItems: "center",
++    justifyContent: "center",
++  },
++  section: { gap: 10 },
++  sectionTitle: { fontSize: 18, lineHeight: 24 },
++  resume: {
++    flexDirection: "row",
++    alignItems: "center",
++    gap: 12,
++    padding: 12,
++    borderRadius: radius.md,
++    backgroundColor: colors.surface,
++    borderWidth: 1,
++    borderColor: colors.line,
++  },
++  caption: { fontSize: 13, lineHeight: 18 },
++  mark: {
++    width: 36,
++    height: 36,
++    borderRadius: radius.pill,
++    alignItems: "center",
++    justifyContent: "center",
++    backgroundColor: colors.surfaceSunken,
++    overflow: "hidden",
++  },
++  markImage: { width: 28, height: 28 },
++  markText: { fontSize: 12, color: colors.accentInk },
++});
+diff --git a/apps/mobile/src/browse/home-state.ts b/apps/mobile/src/browse/home-state.ts
+new file mode 100644
+index 0000000..61b053e
+--- /dev/null
++++ b/apps/mobile/src/browse/home-state.ts
+@@ -0,0 +1,53 @@
++import type { Merchant } from "../merchants/merchants-api";
++import type { BrowserTarget } from "../merchants/MerchantPicker";
++
++/** Continue shopping offers at most this many open store tabs. */
++export const CONTINUE_LIMIT = 2;
++
++/** A store's short name for tiles and rows ("Best Buy Canada" → "Best Buy"). */
++export const storeLabel = (name: string) => name.replace(/ Canada$/, "");
++
++/** Moves a store to the front of the recently opened list. */
++export function touchRecent(recent: readonly string[], url: string) {
++  return [url, ...recent.filter((item) => item !== url)];
++}
++
++/** The open store tabs to offer again, the most recently opened first. */
++export function continueTargets(
++  sessions: readonly BrowserTarget[],
++  recent: readonly string[],
++  limit = CONTINUE_LIMIT,
++): BrowserTarget[] {
++  return recent
++    .flatMap((url) => sessions.find((target) => target.url === url) ?? [])
++    .slice(0, limit);
++}
++
++/** Stores whose name or domain contains the query; an empty query keeps them all, in catalog order. */
++export function matchStores(
++  merchants: readonly Merchant[],
++  query: string,
++): Merchant[] {
++  const q = query.trim().toLowerCase();
++  if (!q) return [...merchants];
++  return merchants.filter(
++    (m) =>
++      storeLabel(m.name).toLowerCase().includes(q) ||
++      m.domains.some((domain) => domain.toLowerCase().includes(q)),
++  );
++}
++
++/** The intro strip shows until the shopper has a product or dismisses it; never before both are known. */
++export function showIntro({
++  cartReady,
++  cartCount,
++  dismissedReady,
++  dismissed,
++}: {
++  cartReady: boolean;
++  cartCount: number;
++  dismissedReady: boolean;
++  dismissed: boolean;
++}) {
++  return cartReady && dismissedReady && !dismissed && cartCount === 0;
++}
+diff --git a/apps/mobile/src/merchants/MerchantPicker.tsx b/apps/mobile/src/merchants/MerchantPicker.tsx
+index 47b3656..c2f4456 100644
+--- a/apps/mobile/src/merchants/MerchantPicker.tsx
++++ b/apps/mobile/src/merchants/MerchantPicker.tsx
+@@ -7,25 +7,35 @@ import {
+   TextInput,
+   View,
+ } from "react-native";
+-import { Button, Copy, Pressable, colors } from "@morydeals/ui";
++import { Link } from "lucide-react-native";
++import { Button, Copy, Pressable, colors, radius } from "@morydeals/ui";
+ import type { MerchantCatalog } from "./merchants-api";
+ import { productUrl } from "../products-api";
++import { matchStores, storeLabel } from "../browse/home-state";
+ export type BrowserTarget = {
+   name: string;
+   url: string;
+   logoUrl?: string | null;
+ };
+-/** Store tiles for the browse page. Search and intent are handled by the AI dock. */
++const COLUMNS = 3;
++const GAP = 10;
++/** The store grid on Browse: three tiles a row, filtered by the store search; the last tile opens any other store. */
+ export const MerchantPicker = memo(function MerchantPicker({
+   catalog,
+   error,
+   onReload,
+   onOpen,
++  query = "",
++  width,
+ }: {
+   catalog: MerchantCatalog | null;
+   error: string;
+   onReload: () => void;
+   onOpen: (target: BrowserTarget) => void;
++  /** The store search; matches names and domains. */
++  query?: string;
++  /** The grid's width, for three equal tiles a row. */
++  width: number;
+ }) {
+   const [others, setOthers] = useState(false);
+   const [url, setUrl] = useState("");
+@@ -44,6 +54,9 @@ export const MerchantPicker = memo(function MerchantPicker({
+       );
+     }
+   };
++  // Floored so rounding never pushes the third tile onto the next row.
++  const tile = { width: Math.floor((width - GAP * (COLUMNS - 1)) / COLUMNS) };
++  const stores = catalog ? matchStores(catalog.merchants, query) : [];
+   return (
+     <View style={s.root}>
+       {!catalog && !error ? <ActivityIndicator color={colors.accent} /> : null}
+@@ -53,8 +66,11 @@ export const MerchantPicker = memo(function MerchantPicker({
+           <Button onPress={onReload}>Reload stores</Button>
+         </>
+       ) : null}
++      {catalog && query.trim() && !stores.length ? (
++        <Copy tone="muted">No store matches “{query.trim()}”.</Copy>
++      ) : null}
+       <View style={s.stores}>
+-        {catalog?.merchants.map((m) => (
++        {stores.map((m) => (
+           <Pressable
+             key={m.id}
+             accessibilityRole="button"
+@@ -62,7 +78,7 @@ export const MerchantPicker = memo(function MerchantPicker({
+             onPress={() =>
+               onOpen({ name: m.name, url: m.homeUrl, logoUrl: m.logoUrl })
+             }
+-            style={s.tile}
++            style={[s.tile, tile]}
+           >
+             <View style={s.logo}>
+               {m.logoUrl ? (
+@@ -74,28 +90,28 @@ export const MerchantPicker = memo(function MerchantPicker({
+                 />
+               ) : (
+                 <Copy weight="extra" style={s.logoFallback}>
+-                  {m.name
+-                    .replace(/ Canada$/, "")
+-                    .slice(0, 2)
+-                    .toUpperCase()}
++                  {storeLabel(m.name).slice(0, 2).toUpperCase()}
+                 </Copy>
+               )}
+             </View>
+-            <Copy weight="extra" style={s.storeName}>
+-              {m.name.replace(/ Canada$/, "")}
++            <Copy weight="extra" numberOfLines={2} style={s.storeName}>
++              {storeLabel(m.name)}
+             </Copy>
+           </Pressable>
+         ))}
+         {catalog?.allowOthers ? (
+           <Pressable
+             accessibilityRole="button"
+-            accessibilityLabel="Other stores"
++            accessibilityLabel="Other store"
+             accessibilityState={{ expanded: others }}
+             onPress={() => setOthers((x) => !x)}
+-            style={s.tile}
++            style={[s.tile, s.otherTile, tile]}
+           >
+-            <Copy weight="extra" style={s.storeName}>
+-              Others +
++            <View style={[s.logo, s.otherMark]}>
++              <Link size={20} color={colors.ink} />
++            </View>
++            <Copy weight="extra" numberOfLines={1} style={s.storeName}>
++              Other store
+             </Copy>
+           </Pressable>
+         ) : null}
+@@ -124,10 +140,9 @@ export const MerchantPicker = memo(function MerchantPicker({
+ });
+ const s = StyleSheet.create({
+   root: { width: "100%", gap: 12 },
+-  stores: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
++  stores: { flexDirection: "row", flexWrap: "wrap", gap: GAP },
+   tile: {
+-    width: "48%",
+-    minHeight: 110,
++    minHeight: 104,
+     justifyContent: "center",
+     alignItems: "center",
+     gap: 8,
+@@ -137,16 +152,25 @@ const s = StyleSheet.create({
+     borderRadius: 18,
+     padding: 10,
+   },
++  otherTile: { backgroundColor: colors.surfaceAlt },
++  otherMark: {
++    width: 44,
++    height: 44,
++    borderRadius: radius.pill,
++    borderWidth: 1,
++    borderColor: colors.lineStrong,
++    backgroundColor: colors.surface,
++  },
+   // The logo sits directly on the tile, with no plate behind it.
+   logo: {
+-    width: 52,
+-    height: 52,
++    width: 48,
++    height: 48,
+     alignItems: "center",
+     justifyContent: "center",
+   },
+-  logoImage: { width: 48, height: 48 },
++  logoImage: { width: 44, height: 44 },
+   logoFallback: { fontSize: 15, color: colors.accentInk },
+-  storeName: { fontSize: 20, textAlign: "center" },
++  storeName: { fontSize: 14, lineHeight: 18, textAlign: "center" },
+   other: { gap: 10 },
+   input: {
+     borderWidth: 1,
+diff --git a/apps/mobile/src/navigation/navigation-items.tsx b/apps/mobile/src/navigation/navigation-items.tsx
+new file mode 100644
+index 0000000..ac7593b
+--- /dev/null
++++ b/apps/mobile/src/navigation/navigation-items.tsx
+@@ -0,0 +1,45 @@
++import {
++  Compass,
++  ShoppingBag,
++  ListChecks,
++  UserRound,
++} from "lucide-react-native";
++import { LogoCarousel, colors, type DockNavigationItem } from "@morydeals/ui";
++/** While Browse is not the open page, its icon cycles through the stores' logos. */
++export const navigationItems = (logos: string[]): DockNavigationItem[] => [
++  {
++    key: "browse",
++    label: "Browse stores",
++    title: "Browse",
++    icon: (selected) =>
++      selected || !logos.length ? (
++        <Compass size={20} color={selected ? colors.accent : colors.ink} />
++      ) : (
++        <LogoCarousel uris={logos} size={22} />
++      ),
++  },
++  {
++    key: "cart",
++    label: "Your cart",
++    title: "Cart",
++    icon: (selected) => (
++      <ShoppingBag size={20} color={selected ? colors.accent : colors.ink} />
++    ),
++  },
++  {
++    key: "lists",
++    label: "Your lists",
++    title: "List",
++    icon: (selected) => (
++      <ListChecks size={20} color={selected ? colors.accent : colors.ink} />
++    ),
++  },
++  {
++    key: "account",
++    label: "Your account",
++    title: "Account",
++    icon: (selected) => (
++      <UserRound size={20} color={selected ? colors.accent : colors.ink} />
++    ),
++  },
++];
+diff --git a/apps/mobile/test/browse-home.test.ts b/apps/mobile/test/browse-home.test.ts
+new file mode 100644
+index 0000000..4f0e46e
+--- /dev/null
++++ b/apps/mobile/test/browse-home.test.ts
+@@ -0,0 +1,72 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import {
++  CONTINUE_LIMIT,
++  continueTargets,
++  matchStores,
++  showIntro,
++  storeLabel,
++  touchRecent,
++} from "../src/browse/home-state";
++import type { Merchant } from "../src/merchants/merchants-api";
++
++const store = (name: string, domain: string): Merchant => ({
++  id: domain,
++  name,
++  homeUrl: `https://www.${domain}/`,
++  logoUrl: null,
++  domains: [domain],
++});
++const merchants = [
++  store("Best Buy Canada", "bestbuy.ca"),
++  store("Walmart Canada", "walmart.ca"),
++  store("Sephora", "sephora.com"),
++];
++
++test("a store's short name drops the trailing Canada only", () => {
++  assert.equal(storeLabel("Best Buy Canada"), "Best Buy");
++  assert.equal(storeLabel("Canadian Tire"), "Canadian Tire");
++});
++
++test("the store search matches names and domains, ignoring case and spaces", () => {
++  assert.deepEqual(matchStores(merchants, ""), merchants);
++  assert.deepEqual(matchStores(merchants, "   "), merchants);
++  assert.deepEqual(
++    matchStores(merchants, " best ").map((m) => m.id),
++    ["bestbuy.ca"],
++  );
++  assert.deepEqual(
++    matchStores(merchants, "WALMART.CA").map((m) => m.id),
++    ["walmart.ca"],
++  );
++  // "Canada" is not part of the shown name, so it does not match every Canadian store.
++  assert.deepEqual(matchStores(merchants, "canada"), []);
++});
++
++test("continue shopping offers the most recently opened tabs, at most two", () => {
++  const tabs = merchants.map((m) => ({ name: m.name, url: m.homeUrl }));
++  let recent: string[] = [];
++  for (const tab of tabs) recent = touchRecent(recent, tab.url);
++  // Reopening a tab moves it to the front without duplicating it.
++  recent = touchRecent(recent, tabs[0].url);
++  assert.deepEqual(recent, [tabs[0].url, tabs[2].url, tabs[1].url]);
++  assert.equal(CONTINUE_LIMIT, 2);
++  assert.deepEqual(continueTargets(tabs, recent), [tabs[0], tabs[2]]);
++  // A recent store without an open tab is skipped; no tabs, nothing to resume.
++  assert.deepEqual(continueTargets([tabs[1]], recent), [tabs[1]]);
++  assert.deepEqual(continueTargets([], recent), []);
++});
++
++test("the intro shows on an empty cart until dismissed, and never before both are loaded", () => {
++  const base = {
++    cartReady: true,
++    cartCount: 0,
++    dismissedReady: true,
++    dismissed: false,
++  };
++  assert.equal(showIntro(base), true);
++  assert.equal(showIntro({ ...base, cartCount: 1 }), false);
++  assert.equal(showIntro({ ...base, dismissed: true }), false);
++  assert.equal(showIntro({ ...base, cartReady: false }), false);
++  assert.equal(showIntro({ ...base, dismissedReady: false }), false);
++});
+diff --git a/packages/ui/src/index.ts b/packages/ui/src/index.ts
+index 841c7a8..305cd49 100644
+--- a/packages/ui/src/index.ts
++++ b/packages/ui/src/index.ts
+@@ -50,6 +50,7 @@ export * from "./data/PriceChart";
+ export * from "./data/price-history";
+ export * from "./content/PriceHistory";
+ export * from "./chat/AssistantDock";
++export { DockInput } from "./chat/DockInput";
+ export * from "./commerce/CouponCard";
+ export {
+   Pressable,

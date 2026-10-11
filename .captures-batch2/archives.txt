@@ -1,0 +1,3 @@
+.local/crawl-archive/product-page/2026-10-11/www.homedepot.ca/b1b8e6ed65a3d48f/7ecc162e-0d67-48ea-a0c4-76c75b9f0167--ad2cdd10-cc3d-4c1a-a09b-2f453bf5485f.zip
+.local/crawl-archive/product-page/2026-10-11/www.frankandoak.com/11f19dff10d24bd6/c184dc98-f5f7-47c0-86fb-db191735e194--c13fbf2f-d2d2-4a20-922b-e94607381973.zip
+.local/crawl-archive/product-page/2026-10-11/www.amazon.com/2ee7e582c9202072/a8b7eaa1-3898-4fb2-9e64-f30c7b9d5df3--83b7ccb9-a79b-4e3e-9a7e-0facea007e24.zip

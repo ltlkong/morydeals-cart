@@ -1,0 +1,196 @@
+<html><body><div id="dealBadge_feature_div" class="celwidget" data-feature-name="dealBadge"
+                 data-csa-c-type="widget" data-csa-c-content-id="dealBadge"
+                 data-csa-c-slot-id="dealBadge_feature_div" data-csa-c-asin="B0FB5HZYG8"
+                 data-csa-c-is-in-initial-active-row="false">
+                                                 <span class="dealBadge aok-relative" style="--deal-badge-bg:#CC0C39;--deal-badge-fg:#ffffff;" data-csa-c-type='item' data-csa-c-owner='DealsX' data-csa-c-posx='1' data-csa-c-item-id="amzn1.asin.B0FB5HZYG8:amzn1.deal.eb48ad16" data-csa-c-painter='dp-deal'>
+               <span id="deals_countdown_timer_from_hours_screen_reader_label" class="aok-hidden">Ends in  NO_OF_HOURS hours NO_OF_MINUTES minutes</span> <span id="deals_countdown_timer_from_minutes_without_seconds_screen_reader_label" class="aok-hidden">Ends in  NO_OF_MINUTES minutes</span> <span id="deals_countdown_timer_from_minutes_with_seconds_screen_reader_label" class="aok-hidden">Ends in  NO_OF_MINUTES minutes NO_OF_SECONDS seconds</span> <span id="deals_countdown_timer_from_seconds_screen_reader_label" class="aok-hidden">Ends in  NO_OF_SECONDS seconds</span> <span id="dealBadgeSupportingText" class="a-size-small dealBadgeTextColor a-text-bold"> <span>Ends in </span> <span id="detailpage-dealBadge-countdown-timer" data-target-time="2026-10-11T06:59:59Z" class="detailpage-dealBadge-countdown-timer"> 05:15:12 </span> <script type="text/javascript">(function(f) {var _np=(window.P._namespace("GoldboxUDPAssets"));if(_np.guardFatal){_np.guardFatal(f)(_np);}else{f(_np);}}(function(P) { 
+
+function isComponentRegistered(componentName) {
+    var isRegistered = false;
+    P.now("registrationStarted:" + componentName).execute(function (loaded) {
+        isRegistered = !!loaded;
+    });
+    return isRegistered;
+}
+
+function setComponentRegistered(componentName) {
+    P.declare("registrationStarted:" + componentName, true);
+}
+                            if (!isComponentRegistered("count-down-controller-detailpage-dealBadge")) {
+                                setComponentRegistered("count-down-controller-detailpage-dealBadge");
+                                P.when('jQuery').register('count-down-controller-detailpage-dealBadge', function($) {
+                                    function countDown(timer) {
+                                        var $timer = $(timer);
+                                        var targetDateStr = $(timer).attr("data-target-time");
+                                        var targetDate = Date.parse(targetDateStr);
+                                        var dealBadgeSupportingText = '#dealBadgeSupportingText';
+                                        $(dealBadgeSupportingText).attr("aria-hidden","true");
+
+                                        var interval = null;
+                                        interval = setInterval(function () {
+                                            var diffMillis = targetDate - Date.now();
+                                            var diffSeconds = Math.floor(diffMillis / 1000);
+                                            if (diffSeconds < 0) {
+                                            $timer.text('00:00');
+                                            clearInterval(interval);
+                                            $(dealBadgeSupportingText).removeAttr("aria-hidden");
+                                            } else {
+                                                var hours = Math.floor((diffSeconds / (60 * 60)) % 24);
+                                                var minutes = Math.floor((diffSeconds / 60) % 60);
+                                                var seconds = Math.floor(diffSeconds % 60);
+
+                                                var hoursStr = ('0' + hours).slice(-2);
+                                                var minutesStr = ('0' + minutes).slice(-2);
+                                                var secondsStr = ('0' + seconds).slice(-2);
+                                                var timeStr = '';
+                                                if (hours > 0) {
+                                                    timeStr = [hoursStr, minutesStr, secondsStr].join(':');
+                                                } else {
+                                                    timeStr = [minutesStr, secondsStr].join(':');
+                                                }
+                                                $timer.text(timeStr);
+                                                updateOffscreenText(hours, minutes, seconds)
+                                            }
+                                        }, 1000);
+                                    }
+
+                                    var offscreenTextEnum = {
+                                        hours: 0,
+                                        minutes: 1,
+                                        seconds: 2,
+                                    };
+                                    var offscreenTextIDs = [
+                                        '#deals_countdown_timer_from_hours_screen_reader_label',
+                                        '#deals_countdown_timer_from_minutes_without_seconds_screen_reader_label',
+                                        '#deals_countdown_timer_from_seconds_screen_reader_label',
+                                    ];
+                                    var offscreenTextTemplates = offscreenTextIDs.map(function (id) {
+                                        return $(id).text()
+                                    });
+                                    var classHidden = 'aok-hidden';
+                                    var classOffscreen = 'aok-offscreen';
+
+                                    function updateOffscreenText(hours, minutes, seconds) {
+                                        var type = getOffscrrenType(hours, minutes);
+                                        var elementID = offscreenTextIDs[type];
+                                        var template = offscreenTextTemplates[type];
+                                        var text = template
+                                        .replace('NO_OF_HOURS', hours)
+                                        .replace('NO_OF_MINUTES', minutes)
+                                        .replace('NO_OF_SECONDS', seconds);
+
+                                        $(elementID).text(text);
+                                        showOffscreenElement(elementID);
+                                        offscreenTextIDs.filter(function (_, idx) {
+                                            return idx != type;
+                                        }).forEach(function (id) {
+                                            return hideOffscreenElement(id)
+                                        });
+                                        if (isTimerOver(hours, minutes, seconds)) {
+                                            hideOffscreenElement(elementID);
+                                        }
+                                    }
+                                    function getOffscrrenType(hours, minutes) {
+                                        if (hours > 0) {
+                                            return offscreenTextEnum.hours;
+                                        }
+                                        if (minutes >= 1) {
+                                            return offscreenTextEnum.minutes;
+                                        }
+                                        return offscreenTextEnum.seconds;
+                                    }
+                                    function showOffscreenElement(elementID) {
+                                        $(elementID).removeClass(classHidden).addClass(classOffscreen);
+                                    }
+
+                                    function hideOffscreenElement(elementID) {
+                                        $(elementID).removeClass(classOffscreen).addClass(classHidden);
+                                    }
+
+                                    function isTimerOver(hours, minutes, seconds) {
+                                        return hours == 0 && minutes == 0 && seconds == 0;
+                                    }
+                                    return {
+                                        countDown   : countDown
+                                    };
+                                });
+                            }
+                            P.when('A', 'count-down-controller-detailpage-dealBadge', 'ready').execute(function(A, countDownController) {
+                                var timers = document.querySelectorAll('.detailpage-dealBadge-countdown-timer');
+
+                                A.each(timers, function(timer) {
+                                    countDownController.countDown(timer);
+                                });
+                            });
+                        }));</script>   </span> </span>
+      <style type="text/css">
+        .dealBadgeSupportingText {
+            color:#CC0C39;
+        }
+    </style>
+                                 </div>
+                                <div id="delightPricingBadge_feature_div" class="celwidget" data-feature-name="delightPricingBadge"
+                 data-csa-c-type="widget" data-csa-c-content-id="delightPricingBadge"
+                 data-csa-c-slot-id="delightPricingBadge_feature_div" data-csa-c-asin="B0FB5HZYG8"
+                 data-csa-c-is-in-initial-active-row="false">
+                              <style>
+.delight-pricing-badge {
+	background-color: #B12704 !important;
+	margin: auto;
+	font-family: "Amazon Ember", Arial, sans-serif;
+	padding-left: 10px;
+	padding-right: 10px;
+	font-size: 12px !important;
+	line-height: 24px !important;
+	max-width: 140px;
+}
+
+.delight-pricing-badge-label {
+	position: relative;
+	z-index: 1;
+	float: left;
+}
+
+.delight-pricing-badge-label-text {
+	color: #ffffff !important;
+}
+
+.delight-pricing-container span {
+	display: inline-block;
+	vertical-align: middle;
+}
+
+.delight-pricing-container {
+	padding-bottom: 5px;
+}
+
+.delight-pricing-badge-description-text {
+	padding-left: 10px;
+	margin: auto;
+	font-family: "Amazon Ember", Arial, sans-serif;
+	color: #111;
+}
+
+.reinventDelightPricing {
+    color:#CC0C39 !important;
+}
+
+.delightPricingBadge {
+    background-color: #CC0C39!important;
+    padding:4px 8px 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    vertical-align: middle;
+    margin-bottom: 4px;
+}
+
+</style>
+
+<!-- considering updating DetailPageDelightPricingTests package whenever you change the template view -->
+                                </div>
+                                <div id="inemi_feature_div" class="celwidget" data-feature-name="inemi"
+                 data-csa-c-type="widget" data-csa-c-content-id="inemi"
+                 data-csa-c-slot-id="inemi_feature_div" data-csa-c-asin="B0FB5HZYG8"
+                 data-csa-c-is-in-initial-active-row="false">
+                                                                 </div>
+                                </div></body></html>

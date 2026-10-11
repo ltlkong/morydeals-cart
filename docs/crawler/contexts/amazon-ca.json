@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "locale": "en-CA",
+  "acquisition": { "mode": "http", "waitFor": { "selector": "#productTitle" } },
+  "parsing": { "strategy": "amazon-ca" }
+}

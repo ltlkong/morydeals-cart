@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "locale": "en-CA",
+  "acquisition": {
+    "mode": "api",
+    "provider": "shopify",
+    "store": {
+      "shopDomain": "aftershokz-canada.myshopify.com",
+      "country": "CA",
+      "language": "EN",
+      "currency": "CAD"
+    }
+  },
+  "parsing": { "strategy": "shopify" }
+}

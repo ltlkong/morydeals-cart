@@ -1,0 +1,139 @@
+{
+  "taskId": "a7aa860e-c604-4a3b-ba0a-c75c8457ad47",
+  "attemptId": "9dfcfd68-b9c7-47cb-a3f1-6bbb3a7d0878",
+  "status": "needs_review",
+  "auditId": "product-page/2026-10-11/www.target.com/e2d8cf9db94d9935/a7aa860e-c604-4a3b-ba0a-c75c8457ad47--9dfcfd68-b9c7-47cb-a3f1-6bbb3a7d0878",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "needs_review",
+    "issues": [
+      "No verified concrete price"
+    ],
+    "products": [
+      {
+        "url": "https://www.target.com/p/apple-macbook-neo-a18-pro-2026-laptop-256gb-citrus/-/A-85966253",
+        "title": "Apple MacBook Neo (A18 Pro, 2026) Laptop - 256GB, Citrus",
+        "brand": "Apple",
+        "images": [
+          "https://target.scene7.com/is/image/Target/GUEST_03009a46-6a34-4080-81d6-8c07d0995fc1?wid=800&hei=800&qlt=80&fmt=pjpeg"
+        ],
+        "offers": [],
+        "evidence": "page.md"
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:48:50.446Z",
+        "completedAt": "2026-10-11T01:48:50.485Z",
+        "durationMs": 38.638,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 59177,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 6232.144,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 55.51,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 831.532,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 39.297,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 37.746,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 5220.014,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 35.11,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 9.152,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 4932,
+      "outputTokens": 957,
+      "requestMs": 5217.735
+    }
+  }
+}

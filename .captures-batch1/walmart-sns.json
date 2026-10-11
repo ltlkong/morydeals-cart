@@ -1,0 +1,153 @@
+{
+  "taskId": "331ad129-93f2-437a-9ee7-87b2fc0f428a",
+  "attemptId": "055e4a7e-2326-46b4-9cec-20027a34d9e6",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.walmart.ca/4f0b8d9a23af80ae/331ad129-93f2-437a-9ee7-87b2fc0f428a--055e4a7e-2326-46b4-9cec-20027a34d9e6",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "walmart-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.walmart.ca/en/ip/Enfamil-A-NeuroPro-Baby-Formula-0-12-months-Powder-Tub/6000207433192",
+        "title": "Enfamil A+ NeuroPro™, Baby Formula, 0-12 months, Powder Tub",
+        "sku": "6000207433192",
+        "rating": {
+          "value": 4.8,
+          "scale": 5,
+          "count": 822,
+          "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.averageRating"
+        },
+        "brand": "Enfamil",
+        "description": "Enfamil A+ NeuroPro is specially designed to support baby’s amazing development in this precious time when it matters most. Enfamil A+ NeuroPro is our closest formula to breastmilk ever, with an expert-recommended level of DHA*, our exclusive blend† including 2'-FL for immune support, and naturally occurring MFGM components#. *DHA supports normal physical brain development, †HuMO6 blend™ of Polydextrose, GOS, 2’-FL, Vit C & E and Selenium, #From whey protein concentrate",
+        "images": [
+          "https://i5.walmartimages.ca/asr/6417c621-0db0-4783-8e43-874b24e9dc6e.becf404ea510e39d8ee0e4ced5dff4de.jpeg",
+          "https://i5.walmartimages.ca/asr/1a7cc332-0f85-4a72-b854-4013bf6ac05c.6075330ab00a043e7fb9b227b2b827c3.jpeg",
+          "https://i5.walmartimages.ca/asr/da8a9d0b-4677-4445-b304-061ceff0c50b.0e7e053ef3b6e76590a17cef865cfa48.jpeg",
+          "https://i5.walmartimages.ca/asr/bce94cf4-c042-4488-884b-02ddfc8afe41.4ce2a1ffba8c508765084a52086d6436.jpeg",
+          "https://i5.walmartimages.ca/asr/55c0d571-4140-492d-8fb2-209501f1bbfd.e21c5a477b7b886f32ae04150af1a1c9.jpeg",
+          "https://i5.walmartimages.ca/asr/f29fe25b-9093-4b27-a214-985df01bfed8.4494a9df6695b4e90e44e4f7c770479e.jpeg"
+        ],
+        "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product",
+        "offers": [
+          {
+            "amountMinor": 5597,
+            "currency": "CAD",
+            "currencyEvidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.currentPrice.currencyUnit",
+            "seller": "Walmart",
+            "url": "https://www.walmart.ca/en/ip/Enfamil-A-NeuroPro-Baby-Formula-0-12-months-Powder-Tub/6000207433192",
+            "evidence": "__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.currentPrice.price",
+            "availability": "InStock"
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:45:01.554Z",
+        "completedAt": "2026-10-11T01:45:03.022Z",
+        "durationMs": 1468.508,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-0.body"
+      }
+    ],
+    "selectedCapture": 0
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "walmart-ca",
+    "evidence": [
+      "url:www.walmart.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "selector": "script#__NEXT_DATA__"
+        }
+      },
+      "parsing": {
+        "strategy": "walmart-ca"
+      },
+      "fallback": [
+        {
+          "on": [
+            "blocked",
+            "incomplete",
+            "http_error",
+            "unsupported_content"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "minTextLength": 80
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 1582.535,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 56.815,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.882,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 1469.345,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 1.99,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 10.449,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 23.525,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 16.508,
+        "status": "completed"
+      }
+    }
+  }
+}

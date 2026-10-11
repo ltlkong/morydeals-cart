@@ -1,0 +1,1 @@
+{"version":1,"locale":"en-CA","budgetMs":60000,"acquisition":{"mode":"http","waitFor":{"selector":"[data-product]"}},"fallback":[{"on":["incomplete"],"acquisition":{"mode":"browser","browser":"camoufox","timeoutMs":30000,"waitFor":{"selector":"[data-product]"}}}]}

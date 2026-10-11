@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "acquisition": { "mode": "http" },
+  "parsing": {
+    "strategy": "llm",
+    "provider": "ollama",
+    "model": "qwen3.5:4b",
+    "timeoutMs": 120000
+  }
+}

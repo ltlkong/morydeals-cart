@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "locale": "en-CA",
+  "decision": {
+    "mode": "auto",
+    "browser": "camoufox"
+  },
+  "network": {
+    "proxyProfile": "dataimpulse-ca-sticky",
+    "rotation": "session"
+  }
+}

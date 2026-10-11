@@ -1,0 +1,251 @@
+{
+  "taskId": "07351ecb-6588-4e5d-adfc-4996e7e84332",
+  "attemptId": "dcac8476-30e0-4bc8-9471-59b8f8cc2513",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.bestbuy.ca/c24cc09cb282c94d/07351ecb-6588-4e5d-adfc-4996e7e84332--dcac8476-30e0-4bc8-9471-59b8f8cc2513",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "bestbuy-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.bestbuy.ca/en-ca/product/19968306",
+        "title": "Google Pixel Watch 5 45mm with Satin Pyrite Aluminum Case",
+        "sku": "19968306",
+        "variant": {
+          "id": "19968306",
+          "label": "BT/Wi-Fi · 45 · Olive Active Band",
+          "options": [
+            {
+              "name": "Connectivity",
+              "value": "BT/Wi-Fi"
+            },
+            {
+              "name": "Case Diameter (mm)",
+              "value": "45"
+            },
+            {
+              "name": "Band Colour",
+              "value": "Olive Active Band"
+            }
+          ],
+          "evidence": "window.__INITIAL_STATE__.product.product.productVariants"
+        },
+        "rating": {
+          "value": 4.84,
+          "scale": 5,
+          "count": 19,
+          "evidence": "window.__INITIAL_STATE__.product.product.customerRating"
+        },
+        "brand": "GOOGLE",
+        "specifications": [
+          {
+            "name": "Model Number",
+            "value": "GFW3R"
+          },
+          {
+            "name": "Product Condition",
+            "value": "Brand New"
+          },
+          {
+            "name": "Case Colour",
+            "value": "Satin Pyrite Aluminum"
+          },
+          {
+            "name": "Case Diameter (mm)",
+            "value": "45 mm"
+          },
+          {
+            "name": "Band Colour",
+            "value": "Olive Active Band"
+          },
+          {
+            "name": "Band Material",
+            "value": "Silicone"
+          },
+          {
+            "name": "Adjustable Band",
+            "value": "Yes"
+          },
+          {
+            "name": "Interchangeable Bands",
+            "value": "Yes"
+          },
+          {
+            "name": "Weight",
+            "value": "70 g"
+          },
+          {
+            "name": "Width",
+            "value": "1.43 cm"
+          },
+          {
+            "name": "Depth",
+            "value": "4.5 cm"
+          },
+          {
+            "name": "Height",
+            "value": "28.3 cm"
+          },
+          {
+            "name": "Display Size",
+            "value": "1.77 in"
+          },
+          {
+            "name": "Connectivity",
+            "value": "BT/Wi-Fi"
+          },
+          {
+            "name": "What's Included",
+            "value": "Google Pixel Watch 5 (45 mm); Active Band, 2nd gen (small and large bands); Google Pixel Watch Quick Charge Dock; Quick Start Guide"
+          }
+        ],
+        "categories": [
+          "Wearable Technology",
+          "Smartwatches & Accessories",
+          "Smartwatches"
+        ],
+        "description": "What you need to know Google Pixel Watch 5 puts health insights, notifications, and everyday Google help close at hand With Gemini Intelligence, Pixel Watch 5 delivers personalized, proactive help when you need it Advanced sensors on the watch help you monitor blood pressure trends, signs of insulin resistance, heart health, and more The Actua 360 domed display features 3,000-nit peak brightness and durable, scratch-resistant Gorilla glass Stay connected from your wrist Track your health day and night with up to 40 hours of battery life Add up to 15 hours of power in just 15 minutes using the included USB-C quick charge dock with 30W adapter (sold separately) Comprehensive wellness tracking Google Health offers adaptive coaching and personalized insights into your wellbeing, sleep and fitness1 View SpO2, heart rate variability, breathing rate, skin temperature variation and resting heart rate—all in one place Tracks your blood pressure trends Using your biometrics, your watch can track trends and help you monitor your insulin resistance levels over the month Watch 5 detects a loss of pulse and prompts a call to emergency services The Google ECG app checks for AFib and alerts you for irregular heart rhythms Body-response feature helps you identify signs of stress, so you can manage it right away Accurate sleep tracking for smarter rest and recovery Morning Brief gives you rich visualizations of sleep stages, fitness metrics, and daily readiness Set your wake-up window, and Watch 5 will pinpoint the ideal moment to rise, based on your body’s rhythm and sleep stage Adjust the thermostat, turn off the lights, and silence your phone with one-tap automation from your watch Get detailed sleep insights like the time spent in sleep stages and breathing regularity to improve your rest See your sleep score for a quick view of your rest quality Support workouts and daily movement Maximize your performance in over 50 activities with heart rate tracking fine-tuned to your specific exercise Build your custom plan for strength workouts, HIIT, cycling, running, and more Real-time audio and visual guidance help you understand when to push, when to rest, and what to conquer next Get a full picture of your progress with weekly cardio targets and daily readiness levels Keep moving with built-in GPS Google Pixel Watch 5 captures every turn with high-precision, dual-frequency GPS powered by machine learning Map city centre runs and dense forest hikes like never before Get helpful Google tools on the go Gemini Intelligence delivers personalized, proactive help right when you need it Raise your wrist to ask Gemini anything (requires pairing with compatible device with Gemini mobile app and a Google Account) Magic Cue gives you the exact info and actions you need in one tap, before you ask Livespace surfaces helpful updates right when you need them One-handed gestures let you control your watch without touching it Stay focused on what counts with a watch that filters the notification noise With Gemini and Google Health Premium subscription (sold separately), you can get personalized answers to your fitness questions, custom fitness plans, proactive health insights, and Sleep Need recommendations1 See more at a glance The Actua 360 domed display delivers vibrant visuals with 3,000-nit peak brightness Scratch-resistant Gorilla glass helps protect the screen from drops and scratches Helps keep you safeIncludes a two-year trial of SOS satellite communications, helping you connect to help when you’re off the grid Set a timer for your solo hike and run. If it expires with no response, your watch will automatically share your location with emergency contacts Emergency sharing instantly sends your real-time location and battery level to chosen contacts Fall detection automatically calls for help from emergency services after a hard fall Car crash detection prompts a call to emergency services if you’re in a severe accident Get more time to act with earthquake alerts on your watch, even if disconnected from your phone (Earthquake alerts are detected by ShakeAlert and by Android. This feature is not supported in all regions, and not all earthquakes can be detected) Use your watch to alert trusted contacts or 911 when you feel unsafe Keep your medical information at hand in case emergency services need to access it Works with compatible devices Protect your Google Pixel phone with alerts when it’s left behind and automatic locking as soon as you’re out of range (available only on Pixel 8 and newer mobile devices. Requires Bluetooth connection between Pixel phone and Pixel watch) Tap your watch or pinch it twice to take group photos, rear-camera selfies, and long-exposure shots (Some Google apps and services require a paired phone within Bluetooth range of your device) Quickly locate misplaced items using Find Hub app’s helpful map view on your watch Check your Nest Cam and Nest Doorbell with the Google Home app (only available on Nest Cam (outdoor or indoor, battery), Nest Cam with floodlight, Nest Cam (indoor, wired, 2nd gen), Nest Doorbell (battery), Nest Doorbell (wired, 2nd gen). Nest camera sold separately) Use your watch as your Google TV remote to adjust the volume, pause and play Use offline Google Maps for navigation, even without your phone nearby Unlock your Google Pixel phone from your watch 1 Requires Google Health Premium subscription (sold separately), Google Health app and internet connection.",
+        "images": [
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_1.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_2.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_3.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_4.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_5.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_6.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_7.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_8.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_9.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_10.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_11.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_12.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_13.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_14.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_15.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_16.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_17.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_18.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_19.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_20.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/199/19968/19968306_21.jpg"
+        ],
+        "evidence": "window.__INITIAL_STATE__.product.product",
+        "offers": [
+          {
+            "amountMinor": 50999,
+            "compareAtAmountMinor": 58999,
+            "compareAtEvidence": "window.__INITIAL_STATE__.product.product.regularPrice",
+            "currency": "CAD",
+            "currencyEvidence": "storefront:bestbuy.ca",
+            "seller": "Best Buy Canada",
+            "condition": "new",
+            "url": "https://www.bestbuy.ca/en-ca/product/19968306",
+            "evidence": "window.__INITIAL_STATE__.product.product.salePrice|priceWithoutEhf|regularPrice",
+            "availability": "InStock",
+            "promotions": [
+              {
+                "type": "sale",
+                "text": "Sale",
+                "validUntil": "2026-10-16T07:00:00.000Z",
+                "evidence": "window.__INITIAL_STATE__.product.product.isOnSale"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:45:22.492Z",
+        "completedAt": "2026-10-11T01:45:26.031Z",
+        "durationMs": 3538.419,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-1.body"
+      }
+    ],
+    "selectedCapture": 1
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "bestbuy-ca",
+    "evidence": [
+      "url:www.bestbuy.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "browser",
+        "browser": "camoufox",
+        "blockResources": [
+          "image",
+          "media",
+          "font"
+        ],
+        "actions": [],
+        "timeoutMs": 30000,
+        "waitFor": {
+          "minTextLength": 80
+        }
+      },
+      "parsing": {
+        "strategy": "bestbuy-ca"
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 3705.142,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 57.216,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.729,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 3539.196,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 1.694,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 14.577,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 64.421,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 23.767,
+        "status": "completed"
+      }
+    }
+  }
+}

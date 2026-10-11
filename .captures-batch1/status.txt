@@ -1,0 +1,26 @@
+amazon-used 0 4s
+amazon-deal 0 4s
+amazon-mouse 0 4s
+walmart-sns 0 3s
+walmart-mkt 0 3s
+walmart-shark 0 3s
+bestbuy-watch 0 5s
+newegg-case 0 4s
+newegg-asus 0 7s
+lulu-align 1 7s
+ctire-inflator 0 15s
+ctire-treadmill 0 16s
+costco-s26 0 6s
+homedepot-dish 0 5s
+staples-planner 0 6s
+londondrugs-buds 1 6s
+apple-case 0 6s
+frankoak-shirt 1 6s
+ssense-jacket 0 6s
+simons-shirt 0 6s
+sportchek-nike 1 22s
+amazoncom-dot 1 5s
+bestbuycom-beats 0 11s
+target-macbook 0 7s
+uniqlo-tee 0 14s
+DONE

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "locale": "en-CA",
+  "acquisition": {
+    "mode": "http",
+    "network": {
+      "proxyProfile": "dataimpulse-ca-rotating",
+      "rotation": "per-request"
+    }
+  }
+}

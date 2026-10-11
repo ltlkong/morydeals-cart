@@ -1,0 +1,156 @@
+{
+  "taskId": "0a468199-e41e-41b4-b411-641999227b6e",
+  "attemptId": "887f9d1b-600b-41f8-ae56-219f62267131",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.uniqlo.com/2520aadb0fee2b1c/0a468199-e41e-41b4-b411-641999227b6e--887f9d1b-600b-41f8-ae56-219f62267131",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "parsed",
+    "issues": [],
+    "products": [
+      {
+        "url": "https://www.uniqlo.com/ca/en/products/E422992-000/00?colorDisplayCode=16&sizeDisplayCode=003",
+        "title": "Crew Neck T-Shirt",
+        "images": [
+          "https://image.uniqlo.com/UQ/ST3/ca/imagesgoods/422992/item/cagoods_16_422992_3x4.jpg"
+        ],
+        "offers": [
+          {
+            "amountMinor": 2490,
+            "currency": "CAD",
+            "currencyEvidence": "url-locale:ca",
+            "url": "https://www.uniqlo.com/ca/en/products/E422992-000/00?colorDisplayCode=16&sizeDisplayCode=003",
+            "evidence": "CA $ 24.90"
+          }
+        ],
+        "evidence": "page.md"
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:49:03.724Z",
+        "completedAt": "2026-10-11T01:49:03.785Z",
+        "durationMs": 60.319,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "Primary content has no price or availability evidence",
+        "captureFile": "response-1.body"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:49:03.785Z",
+        "completedAt": "2026-10-11T01:49:08.913Z",
+        "durationMs": 5128.299,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-4.body"
+      }
+    ],
+    "selectedCapture": 4
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "unknown",
+    "evidence": [
+      "No confirmed platform declaration"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 57524,
+      "acquisition": {
+        "mode": "http",
+        "timeoutMs": 20000,
+        "waitFor": {
+          "product": true
+        }
+      },
+      "parsing": {
+        "strategy": "generic",
+        "llm": {
+          "strategy": "llm",
+          "provider": "anthropic",
+          "timeoutMs": 120000
+        }
+      },
+      "fallback": [
+        {
+          "on": [
+            "incomplete"
+          ],
+          "acquisition": {
+            "mode": "browser",
+            "browser": "camoufox",
+            "blockResources": [
+              "image",
+              "media",
+              "font"
+            ],
+            "actions": [],
+            "timeoutMs": 30000,
+            "waitFor": {
+              "product": true
+            }
+          }
+        }
+      ],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 12066.416,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 61.882,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 2486.429,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 5189.808,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 118.704,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 4079.762,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 102.879,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 22.918,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 16120,
+      "outputTokens": 704,
+      "requestMs": 4076.498
+    }
+  }
+}

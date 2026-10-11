@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "MoryDeals UI Showcase",
+    "slug": "morydeals-ui-showcase",
+    "scheme": "morydeals-ui-showcase",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.morydeals.uishowcase" },
+    "android": { "package": "com.morydeals.uishowcase" },
+    "web": { "bundler": "metro" }
+  }
+}

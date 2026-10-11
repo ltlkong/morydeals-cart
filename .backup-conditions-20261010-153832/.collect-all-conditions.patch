@@ -1,0 +1,1561 @@
+diff --git a/apps/api/src/feature/catalog/services/product-lookup.service.ts b/apps/api/src/feature/catalog/services/product-lookup.service.ts
+index 304764f..1355f49 100644
+--- a/apps/api/src/feature/catalog/services/product-lookup.service.ts
++++ b/apps/api/src/feature/catalog/services/product-lookup.service.ts
+@@ -4,6 +4,7 @@ import { Prisma } from "../../../generated/prisma/client.ts";
+ import { PrismaService } from "../../../core/database/services/prisma.service.ts";
+ import {
+   ProductDataSchema,
++  conditionKey,
+   productFacts,
+   type Product,
+ } from "../../products/schema/products.schema.ts";
+@@ -58,11 +59,16 @@ export class ProductLookupService {
+         const found =
+           candidates(url).find((candidate) => products.has(candidate)) ?? url;
+         const product = ProductDataSchema.safeParse(products.get(found));
++        const series = history.get(found) ?? new Map<string, PricePoint[]>();
++        const shown = product.success
++          ? productFacts(product.data, { history: series })
++          : null;
+         return [
+           url,
+           {
+-            product: product.success ? productFacts(product.data) : null,
+-            history: history.get(found) ?? [],
++            product: shown,
++            // The primary offer's own condition: a used price never enters the new price's history.
++            history: series.get(conditionKey(shown?.condition)) ?? [],
+           },
+         ];
+       }),
+@@ -81,42 +87,56 @@ export class ProductLookupService {
+       ORDER BY o.observed_at DESC LIMIT 1`);
+     return rows[0]?.url ?? null;
+   }
+-  /** Keepa Buy Box points, our captured prices, and the Keepa price in effect when the window starts. */
++  /**
++   * Price history per condition. Keepa Buy Box points are new. Our captures give, per capture and condition, the
++   * new series' featured offer (the lowest offer index: the price the page put first) and, for every other
++   * condition, its lowest price ("used from"). An offer that states no condition is read with new.
++   */
+   private async history(keys: string[]) {
+     const rows = await this.db.$queryRaw<
+-      { url: string; at: Date; amount: bigint | null }[]
++      {
++        url: string;
++        at: Date;
++        amount: bigint | null;
++        condition?: string | null;
++      }[]
+     >(Prisma.sql`
+       SELECT * FROM (
+-        SELECT DISTINCT ON (p.url) p.url, e.observed_at AS at, e.amount_minor AS amount
++        SELECT DISTINCT ON (p.url) p.url, e.observed_at AS at, e.amount_minor AS amount, 'new' AS condition
+         FROM public.external_price_points e JOIN public.tracked_products p ON p.id = e.product_id
+         WHERE p.identity_key IN (${Prisma.join(keys)}) AND e.source = 'keepa' AND e.series = 'buy_box'
+           AND e.observed_at <= now() - interval '90 days'
+         ORDER BY p.url, e.observed_at DESC
+       ) before_window
+       UNION ALL
+-      SELECT p.url, e.observed_at, e.amount_minor
++      SELECT p.url, e.observed_at, e.amount_minor, 'new'
+       FROM public.external_price_points e JOIN public.tracked_products p ON p.id = e.product_id
+       WHERE p.identity_key IN (${Prisma.join(keys)}) AND e.source = 'keepa' AND e.series = 'buy_box'
+         AND e.observed_at > now() - interval '90 days'
+       UNION ALL
+-      SELECT p.url, o.observed_at, po.amount_minor
+-      FROM public.price_observations po
+-      JOIN public.product_observations o ON o.id = po.observation_id
+-      JOIN public.tracked_products p ON p.id = o.product_id
+-      WHERE p.identity_key IN (${Prisma.join(keys)}) AND po.offer_index = 0
+-        AND o.observed_at > now() - interval '90 days'
++      SELECT url, at, amount, condition FROM (
++        SELECT DISTINCT ON (o.id, COALESCE(po.condition, 'new'))
++          p.url, o.observed_at AS at, po.amount_minor AS amount, COALESCE(po.condition, 'new') AS condition
++        FROM public.price_observations po
++        JOIN public.product_observations o ON o.id = po.observation_id
++        JOIN public.tracked_products p ON p.id = o.product_id
++        WHERE p.identity_key IN (${Prisma.join(keys)})
++          AND o.observed_at > now() - interval '90 days'
++        ORDER BY o.id, COALESCE(po.condition, 'new'),
++          CASE WHEN COALESCE(po.condition, 'new') = 'new' THEN po.offer_index::bigint ELSE po.amount_minor END
++      ) captured
+       ORDER BY 2`);
+-    const byUrl = new Map<
+-      string,
+-      { at: string; amountMinor: number | null }[]
+-    >();
++    const byUrl = new Map<string, Map<string, PricePoint[]>>();
+     for (const row of rows) {
+-      const points = byUrl.get(row.url) ?? [];
++      const series = byUrl.get(row.url) ?? new Map<string, PricePoint[]>();
++      const condition = conditionKey(row.condition);
++      const points = series.get(condition) ?? [];
+       points.push({
+         at: new Date(row.at).toISOString(),
+         amountMinor: row.amount === null ? null : Number(row.amount),
+       });
+-      byUrl.set(row.url, points);
++      series.set(condition, points);
++      byUrl.set(row.url, series);
+     }
+     return byUrl;
+   }
+diff --git a/apps/api/src/feature/products/schema/products.schema.ts b/apps/api/src/feature/products/schema/products.schema.ts
+index f86e781..d53f095 100644
+--- a/apps/api/src/feature/products/schema/products.schema.ts
++++ b/apps/api/src/feature/products/schema/products.schema.ts
+@@ -53,7 +53,7 @@ const OfferSchema = z.object({
+   seller: z.string().optional(),
+ });
+ /** The product as the worker stores it (internal evidence is stripped). */
+-export const ProductDataSchema = z.object({
++const ProductFieldsSchema = z.object({
+   url: CrawlTaskSchema.shape.url,
+   title: z.string().min(1),
+   images: z.array(z.string().url()),
+@@ -78,35 +78,115 @@ export const ProductDataSchema = z.object({
+     .catch(undefined),
+   /** When this product was last captured (from the product row; absent on a fresh parse). */
+   observedAt: z.iso.datetime().optional(),
+-  offers: z.array(OfferSchema).length(1),
++});
++/**
++ * The product as the worker stores it (internal evidence is stripped): every offer the page showed, each with
++ * its condition; the first is the primary (new when the page has a new offer).
++ */
++export const ProductDataSchema = ProductFieldsSchema.extend({
++  offers: z.array(OfferSchema).min(1),
+ });
+ type ProductData = z.infer<typeof ProductDataSchema>;
++type Offer = z.infer<typeof OfferSchema>;
++type PricePoint = z.infer<typeof PricePointSchema>;
++/** The condition a price series is kept under: an offer that states none is read with new. */
++export const conditionKey = (condition: string | null | undefined) =>
++  condition ?? "new";
++const stockOf = (offer: Offer) => {
++  const stock = offer.availability?.replace(/^https?:\/\/schema\.org\//, "");
++  return (
++    (stock &&
++      (AVAILABILITY as Record<string, z.infer<typeof AvailabilitySchema>>)[
++        stock
++      ]) ||
++    null
++  );
++};
++/** The cheapest offer of each condition other than the primary's ("Used from $X, Renewed from $Y"). */
++export const OtherOfferSchema = z.object({
++  condition: ConditionSchema,
++  amountMinor: z.number().int().positive().safe(),
++  compareAtAmountMinor: z.number().int().positive().safe().optional(),
++  currency: z.string().regex(/^[A-Z]{3}$/),
++  seller: z.string().optional(),
++  availability: AvailabilitySchema.nullable(),
++  deals: z.array(PromotionSchema),
++  /** How many offers of this condition the page showed. */
++  count: z.number().int().positive(),
++  /** Up to 90 days of this condition's own prices (lowest per capture); absent when not looked up. */
++  history: z.array(PricePointSchema).optional(),
++});
+ /**
+  * The shown offer's facts, normalized for the app: availability (null when the store does not say), condition
+  * (null when unstated) and the deals still running.
+  */
+-export function productFacts(product: ProductData, now = Date.now()): Product {
+-  const [offer] = product.offers;
+-  const stock = offer.availability?.replace(/^https?:\/\/schema\.org\//, "");
++export function productFacts(
++  product: ProductData,
++  {
++    now = Date.now(),
++    history,
++  }: { now?: number; history?: ReadonlyMap<string, PricePoint[]> } = {},
++): Product {
++  // The primary offer keeps every existing field's meaning: the new offer when there is one.
++  const primary =
++    product.offers.find((offer) => conditionKey(offer.condition) === "new") ??
++    product.offers[0];
++  const running = (offer: Offer) =>
++    (offer.promotions ?? []).filter(
++      (deal) => !deal.validUntil || Date.parse(deal.validUntil) > now,
++    );
++  const groups = new Map<z.infer<typeof ConditionSchema>, Offer[]>();
++  for (const offer of product.offers) {
++    if (
++      !offer.condition ||
++      conditionKey(offer.condition) === conditionKey(primary.condition)
++    )
++      continue;
++    // Only prices comparable with the primary one (same currency) are offered beside it.
++    if (offer.currency !== primary.currency) continue;
++    groups.set(offer.condition, [
++      ...(groups.get(offer.condition) ?? []),
++      offer,
++    ]);
++  }
++  const otherOffers = [...groups].map(([condition, offers]) => {
++    const cheapest = offers.reduce((a, b) =>
++      b.amountMinor < a.amountMinor ? b : a,
++    );
++    const series = history?.get(condition);
++    return {
++      condition,
++      amountMinor: cheapest.amountMinor,
++      ...(cheapest.compareAtAmountMinor
++        ? { compareAtAmountMinor: cheapest.compareAtAmountMinor }
++        : {}),
++      currency: cheapest.currency,
++      ...(cheapest.seller ? { seller: cheapest.seller } : {}),
++      availability: stockOf(cheapest),
++      deals: running(cheapest),
++      count: offers.length,
++      ...(series ? { history: series } : {}),
++    };
++  });
++  otherOffers.sort((a, b) => a.amountMinor - b.amountMinor);
+   return {
+     ...product,
+-    availability:
+-      (stock &&
+-        (AVAILABILITY as Record<string, z.infer<typeof AvailabilitySchema>>)[
+-          stock
+-        ]) ||
+-      null,
+-    condition: offer.condition ?? null,
+-    deals: (offer.promotions ?? []).filter(
+-      (deal) => !deal.validUntil || Date.parse(deal.validUntil) > now,
+-    ),
++    offers: [primary],
++    availability: stockOf(primary),
++    condition: primary.condition ?? null,
++    deals: running(primary),
++    otherOffers,
+   };
+ }
+ /** The product as the app receives it: stored data plus its normalized shown-offer facts (`productFacts`). */
+-export const ProductSchema = ProductDataSchema.extend({
++export const ProductSchema = ProductFieldsSchema.extend({
++  /** The primary offer only (one, as before): new when the page has one, else the condition `condition` names. */
++  offers: z.array(OfferSchema).length(1),
+   availability: AvailabilitySchema.nullable(),
+   condition: ConditionSchema.nullable(),
+   deals: z.array(PromotionSchema),
++  /** The other conditions' offers, cheapest first. */
++  otherOffers: z.array(OtherOfferSchema),
+ });
+ export type Product = z.infer<typeof ProductSchema>;
+ // Parsing strips internal evidence and audit metadata at the response boundary.
+diff --git a/apps/api/test/product-facts.test.ts b/apps/api/test/product-facts.test.ts
+index a6950e2..d29cdf6 100644
+--- a/apps/api/test/product-facts.test.ts
++++ b/apps/api/test/product-facts.test.ts
+@@ -46,10 +46,9 @@ const stored = {
+ };
+ 
+ test("the app gets normalized availability, condition and running deals, without evidence", () => {
+-  const product = productFacts(
+-    ProductDataSchema.parse(stored),
+-    Date.parse("2026-10-10T00:00:00Z"),
+-  );
++  const product = productFacts(ProductDataSchema.parse(stored), {
++    now: Date.parse("2026-10-10T00:00:00Z"),
++  });
+   const shown = ProductSchema.parse(product);
+   assert.equal(shown.availability, "backorder");
+   assert.equal(shown.condition, "renewed");
+@@ -143,3 +142,137 @@ test("a URL saved with tracking parameters is answered by its identity's product
+   assert.equal(found?.title, "New");
+   assert.equal(found?.observedAt, "2026-10-10T00:00:00.000Z");
+ });
++
++const offer = (
++  condition: string | undefined,
++  amountMinor: number,
++  extra = {},
++) => ({
++  amountMinor,
++  currency: "CAD",
++  ...(condition ? { condition } : {}),
++  ...extra,
++});
++const many = (offers: object[]) =>
++  ProductDataSchema.parse({
++    url: "https://www.amazon.ca/dp/B0CHX1W1XY",
++    title: "AirPods Pro",
++    images: [],
++    offers,
++  });
++
++test("the primary offer is new when there is one; other conditions are offered cheapest-first, apart", () => {
++  const history = new Map([
++    ["used", [{ at: "2026-10-01T00:00:00.000Z", amountMinor: 20500 }]],
++  ]);
++  const product = ProductSchema.parse(
++    productFacts(
++      many([
++        offer("used", 23915, { seller: "Amazon Resale" }),
++        offer("new", 29900, {
++          compareAtAmountMinor: 32900,
++          seller: "Amazon.ca",
++        }),
++        offer("renewed", 21999, {
++          seller: "Tech Renewed Canada",
++          availability: "InStock",
++        }),
++        offer("used", 19850, { seller: "Second Life Audio" }),
++        offer("new", 30499, { seller: "Gadget Hub CA" }),
++        offer("used", 100, { currency: "USD" }),
++      ]),
++      { history },
++    ),
++  );
++  // Existing fields keep meaning "the new offer".
++  assert.deepEqual(product.offers, [
++    {
++      amountMinor: 29900,
++      compareAtAmountMinor: 32900,
++      currency: "CAD",
++      condition: "new",
++      seller: "Amazon.ca",
++    },
++  ]);
++  assert.equal(product.condition, "new");
++  assert.deepEqual(
++    product.otherOffers.map((o) => [
++      o.condition,
++      o.amountMinor,
++      o.seller,
++      o.count,
++      o.availability,
++    ]),
++    [
++      ["used", 19850, "Second Life Audio", 2, null],
++      ["renewed", 21999, "Tech Renewed Canada", 1, "in_stock"],
++    ],
++  );
++  assert.deepEqual(product.otherOffers[0].history, history.get("used"));
++  assert.equal(product.otherOffers[1].history, undefined);
++});
++
++test("with no new offer the primary is the first offer and names its condition; unstated is read as new", () => {
++  const used = productFacts(
++    many([offer("used", 9000), offer("renewed", 12000)]),
++  );
++  assert.equal(used.condition, "used");
++  assert.equal(used.offers[0].amountMinor, 9000);
++  assert.deepEqual(
++    used.otherOffers.map((o) => o.condition),
++    ["renewed"],
++  );
++  const unstated = productFacts(
++    many([offer("renewed", 12000), offer(undefined, 15000)]),
++  );
++  assert.equal(unstated.offers[0].amountMinor, 15000);
++  assert.equal(unstated.condition, null);
++  assert.deepEqual(
++    unstated.otherOffers.map((o) => o.condition),
++    ["renewed"],
++  );
++});
++
++test("history is answered per condition: the primary's own series, never mixed with used prices", async () => {
++  const url = "https://www.amazon.ca/dp/B0CHX1W1XY";
++  const db = {
++    $queryRaw: async (query: { sql: string }) =>
++      query.sql.includes("external_price_points")
++        ? [
++            {
++              url,
++              at: new Date("2026-10-01T00:00:00Z"),
++              amount: 30900n,
++              condition: "new",
++            },
++            {
++              url,
++              at: new Date("2026-10-01T00:00:00Z"),
++              amount: 21000n,
++              condition: "used",
++            },
++            {
++              url,
++              at: new Date("2026-10-02T00:00:00Z"),
++              amount: 29900n,
++              condition: null,
++            },
++          ]
++        : [
++            {
++              url,
++              data: many([offer("new", 29900), offer("used", 19850)]),
++              observed_at: new Date("2026-10-02T00:00:00Z"),
++            },
++          ],
++  } as unknown as PrismaService;
++  const found = (await new ProductLookupService(db).describe([url])).get(url)!;
++  assert.deepEqual(
++    found.history.map((p) => p.amountMinor),
++    [30900, 29900],
++  );
++  assert.deepEqual(
++    found.product?.otherOffers[0].history?.map((p) => p.amountMinor),
++    [21000],
++  );
++});
+diff --git a/apps/mobile/src/product/ProductDetail.tsx b/apps/mobile/src/product/ProductDetail.tsx
+index ac823c2..58cdd6f 100644
+--- a/apps/mobile/src/product/ProductDetail.tsx
++++ b/apps/mobile/src/product/ProductDetail.tsx
+@@ -26,6 +26,7 @@ import {
+   availabilityOf,
+   conditionLabel,
+   dealLine,
++  otherOffersLine,
+   ratingText,
+ } from "./product-facts";
+ 
+@@ -81,9 +82,9 @@ export function ProductDetail({
+   const stock = availabilityOf(product);
+   const condition = conditionLabel(product.condition);
+   const stars = ratingText(product.rating);
++  const also = otherOffersLine(product, money);
+   const facts = [
+     stock ? availabilityLabels[stock] : undefined,
+-    condition,
+     offer.seller ? `Sold by ${offer.seller}` : undefined,
+   ].filter(Boolean);
+   const act = (action: () => Promise<void>, failure: string) => {
+@@ -150,8 +151,16 @@ export function ProductDetail({
+               </Copy>
+             </View>
+           ) : null}
++          {condition ? (
++            // The shown price is not a new item's: say so on the price itself.
++            <View style={s.conditionPill}>
++              <Copy weight="extra" style={s.conditionText}>
++                {condition}
++              </Copy>
++            </View>
++          ) : null}
+         </View>
+-        {stock || condition ? (
++        {stock ? (
+           <Copy
+             weight="bold"
+             style={[
+@@ -159,12 +168,16 @@ export function ProductDetail({
+               (stock === "out_of_stock" || stock === "discontinued") && {
+                 color: colors.danger,
+               },
+-              !stock && { color: colors.muted },
+             ]}
+           >
+             {facts.join(" · ")}
+           </Copy>
+         ) : null}
++        {also ? (
++          <Copy weight="bold" style={s.also}>
++            {also}
++          </Copy>
++        ) : null}
+         {(product.deals ?? []).map((deal, i) => (
+           <View key={`${deal.type}-${i}`} style={s.deal}>
+             <Copy weight="bold" style={s.dealText}>
+@@ -262,6 +275,14 @@ const s = StyleSheet.create({
+     backgroundColor: colors.accentSoft,
+   },
+   dealText: { fontSize: 13, lineHeight: 18, color: colors.accentInk },
++  conditionPill: {
++    paddingHorizontal: 8,
++    paddingVertical: 2,
++    borderRadius: 999,
++    backgroundColor: colors.surfaceSunken,
++  },
++  conditionText: { fontSize: 13, lineHeight: 18, color: colors.ink },
++  also: { fontSize: 13, lineHeight: 18, color: colors.ink },
+   section: { fontSize: 18, lineHeight: 24, marginTop: 6 },
+   bar: {
+     position: "absolute",
+diff --git a/apps/mobile/src/product/product-facts.ts b/apps/mobile/src/product/product-facts.ts
+index 69d0643..6e69cec 100644
+--- a/apps/mobile/src/product/product-facts.ts
++++ b/apps/mobile/src/product/product-facts.ts
+@@ -120,3 +120,29 @@ export function dealLine(
+     .filter(Boolean)
+     .join(" · ");
+ }
++
++const CONDITION_WORDS: Record<ProductCondition, string> = {
++  new: "New",
++  ...conditionLabels,
++};
++/**
++ * "Also: Used from $239.15 · Renewed from $219.99", the other conditions' cheapest prices the store showed, or
++ * nothing. Out-of-stock offers are left out; nothing is shown that the store did not state.
++ */
++export function otherOffersLine(
++  product: MobileProduct,
++  format: (amountMinor: number, currency: string) => string,
++): string | undefined {
++  const shown = (product.otherOffers ?? []).filter(
++    (offer) =>
++      offer.availability !== "out_of_stock" &&
++      offer.availability !== "discontinued",
++  );
++  if (!shown.length) return undefined;
++  return `Also: ${shown
++    .map(
++      (offer) =>
++        `${CONDITION_WORDS[offer.condition]} from ${format(offer.amountMinor, offer.currency)}`,
++    )
++    .join(" · ")}`;
++}
+diff --git a/apps/mobile/src/products-api.ts b/apps/mobile/src/products-api.ts
+index 41c9758..e9c48d7 100644
+--- a/apps/mobile/src/products-api.ts
++++ b/apps/mobile/src/products-api.ts
+@@ -28,6 +28,8 @@ export type MobileProduct = {
+   condition?: ProductCondition | null;
+   /** Deals the store shows beside the price that are still running. */
+   deals?: ProductDeal[];
++  /** The cheapest offer of each other condition (new is the primary when the store has one). */
++  otherOffers?: OtherOffer[];
+   /** When the product was last captured. */
+   observedAt?: string;
+   /** Up to 90 days of prices from the server cart (Keepa Buy Box and our captures); null is a gap. */
+@@ -49,6 +51,17 @@ export type ProductDeal = {
+   effectiveMinor?: number;
+   validUntil?: string;
+ };
++export type OtherOffer = {
++  condition: ProductCondition;
++  amountMinor: number;
++  compareAtAmountMinor?: number;
++  currency: string;
++  seller?: string;
++  availability?: ProductAvailability | null;
++  deals?: ProductDeal[];
++  count: number;
++  history?: { at: string; amountMinor: number | null }[];
++};
+ type CaptureStatus =
+   | { id: string; status: "pending" }
+   | { id: string; status: "failed"; message: string }
+diff --git a/apps/mobile/test/product-facts.test.ts b/apps/mobile/test/product-facts.test.ts
+index 125e944..eef0df0 100644
+--- a/apps/mobile/test/product-facts.test.ts
++++ b/apps/mobile/test/product-facts.test.ts
+@@ -4,6 +4,7 @@ import type { MobileProduct } from "../src/products-api";
+ import {
+   availabilityOf,
+   dealLine,
++  otherOffersLine,
+   productTags,
+   ratingText,
+ } from "../src/product/product-facts";
+@@ -104,3 +105,45 @@ test("a deal line keeps the store's words, its code and its end", () => {
+     "Save $5 with coupon · Code FALL5 · Ends Oct 12",
+   );
+ });
++
++test("other conditions read as 'Also: Used from $X · Renewed from $Y', leaving out unavailable ones", () => {
++  const format = (amount: number) => `$${(amount / 100).toFixed(2)}`;
++  assert.equal(otherOffersLine(product(), format), undefined);
++  assert.equal(
++    otherOffersLine(
++      product({
++        otherOffers: [
++          { condition: "used", amountMinor: 19850, currency: "CAD", count: 2 },
++          {
++            condition: "renewed",
++            amountMinor: 21999,
++            currency: "CAD",
++            count: 1,
++          },
++          {
++            condition: "open_box",
++            amountMinor: 25000,
++            currency: "CAD",
++            count: 1,
++            availability: "out_of_stock",
++          },
++        ],
++      }),
++      format,
++    ),
++    "Also: Used from $198.50 · Renewed from $219.99",
++  );
++  // A used primary offers the new price beside it.
++  assert.equal(
++    otherOffersLine(
++      product({
++        condition: "used",
++        otherOffers: [
++          { condition: "new", amountMinor: 29900, currency: "CAD", count: 1 },
++        ],
++      }),
++      format,
++    ),
++    "Also: New from $299.00",
++  );
++});
+diff --git a/apps/worker/prisma/migrations/20261014000000_offer_conditions/migration.sql b/apps/worker/prisma/migrations/20261014000000_offer_conditions/migration.sql
+new file mode 100644
+index 0000000..bc12ead
+--- /dev/null
++++ b/apps/worker/prisma/migrations/20261014000000_offer_conditions/migration.sql
+@@ -0,0 +1,23 @@
++-- Every offer a page shows is collected with its condition (new, used, renewed, open-box, damaged): one
++-- price_observations row per offer, offer_index 0 the primary (new when the page has one). Price history is read
++-- per condition, so a used price never enters the new price's history.
++
++-- The seller of each stored offer, from the observation's own product data.
++ALTER TABLE "price_observations" ADD COLUMN "seller" TEXT;
++UPDATE "price_observations" AS po
++SET "seller" = o."data" -> 'offers' -> po."offer_index" ->> 'seller'
++FROM "product_observations" AS o
++WHERE o."id" = po."observation_id"
++  AND jsonb_typeof(o."data" -> 'offers') = 'array'
++  AND jsonb_typeof(o."data" -> 'offers' -> po."offer_index" -> 'seller') = 'string';
++
++-- Until parser 3.14 the Amazon.ca, Best Buy and Newegg parsers admitted only a verified new offer, so their
++-- stored prices are new. Other stores did not state a condition: theirs stay unknown (null), read with new.
++UPDATE "price_observations" AS po
++SET "condition" = 'new'
++FROM "product_observations" AS o
++JOIN "tracked_products" AS p ON p."id" = o."product_id"
++WHERE o."id" = po."observation_id"
++  AND po."condition" IS NULL
++  AND lower(substring(p."url" from '^[A-Za-z][A-Za-z0-9+.-]*://([^/?#:]+)'))
++    IN ('www.amazon.ca', 'amazon.ca', 'www.bestbuy.ca', 'bestbuy.ca', 'www.newegg.ca', 'newegg.ca');
+diff --git a/apps/worker/prisma/schema.prisma b/apps/worker/prisma/schema.prisma
+index 0ba7882..bc81e9b 100644
+--- a/apps/worker/prisma/schema.prisma
++++ b/apps/worker/prisma/schema.prisma
+@@ -99,6 +99,8 @@ model PriceObservation {
+   condition     String?
+   /// Deals shown with this offer: [{type, text, code?, effectiveMinor?, validUntil?, evidence}].
+   promotions    Json?
++  /// The seller the source names for this offer.
++  seller        String?
+   offerUrl      String?            @map("offer_url")
+   evidence      String
+   observation   ProductObservation @relation(fields: [observationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+diff --git a/apps/worker/src/database/capture.repository.ts b/apps/worker/src/database/capture.repository.ts
+index fe81941..2722acd 100644
+--- a/apps/worker/src/database/capture.repository.ts
++++ b/apps/worker/src/database/capture.repository.ts
+@@ -163,6 +163,7 @@ export class CaptureRepository {
+             currency: offer.currency,
+             availability: offer.availability,
+             condition: offer.condition,
++            seller: offer.seller,
+             promotions: offer.promotions?.length ? json(offer.promotions) : Prisma.DbNull,
+             offerUrl: offer.url,
+             evidence: offer.evidence,
+diff --git a/apps/worker/src/parsing/parsers/retailers/amazon.ts b/apps/worker/src/parsing/parsers/retailers/amazon.ts
+index fba46e9..85372f6 100644
+--- a/apps/worker/src/parsing/parsers/retailers/amazon.ts
++++ b/apps/worker/src/parsing/parsers/retailers/amazon.ts
+@@ -8,11 +8,10 @@ import {
+   imageUrls,
+   merchantUrl,
+   parseRetailer,
+-  NON_NEW,
+ } from '../shared/retailer.ts';
+ import { displayedMinorUnits } from '../money.ts';
+-import { promotion, textRating, variant } from '../shared/facts.ts';
+-import type { Promotion } from '../types.ts';
++import { conditionInText, promotion, textRating, variant } from '../shared/facts.ts';
++import type { Condition, Offer, Promotion } from '../types.ts';
+ 
+ function asin(value: string): string {
+   const url = merchantUrl(value, 'amazon.ca');
+@@ -111,7 +110,7 @@ function pageRating(root: HtmlNode) {
+  * Deals shown with the selected offer (the regions morydeals-affiliate reads): a clip coupon, a limited-time or
+  * lightning deal badge, a Prime member price and promotion messages. Text is kept as shown; nothing is computed.
+  */
+-function pagePromotions(root: HtmlNode, region: HtmlNode): Promotion[] {
++function pagePromotions(root: HtmlNode, region: HtmlNode, featured = true): Promotion[] {
+   const read = (scope: HtmlNode, selector: string, type: Promotion['type']) =>
+     all(scope, selector)
+       .filter((node) => !hidden(node))
+@@ -120,14 +119,25 @@ function pagePromotions(root: HtmlNode, region: HtmlNode): Promotion[] {
+       );
+   return [
+     ...read(region, '[id^="couponsInBuybox"], #couponText, #vpcButton, #couponFeature', 'coupon'),
+-    ...read(root, '#dealBadgeSupportingText, #dealBadge_feature_div .dealBadgeTextColor', 'deal'),
+-    ...read(root, '#primeSavingsUpsellCaption_feature_div', 'member'),
++    // Page-level badges belong to the featured new offer, never to a second-hand row.
++    ...(featured
++      ? [
++          ...read(
++            root,
++            '#dealBadgeSupportingText, #dealBadge_feature_div .dealBadgeTextColor',
++            'deal',
++          ),
++          ...read(root, '#primeSavingsUpsellCaption_feature_div', 'member'),
++        ]
++      : []),
+     ...read(region, '#promotionMessageInsideBuyBox_feature_div', 'other'),
+   ].filter((p): p is Promotion => !!p);
+ }
+ /** Option types of an ordinary new one-time purchase; a bundle product's one-time row is typed BUNDLE. */
+ const NEW_PURCHASE = new Set(['NEW', 'BUNDLE']);
+-function read(document: PageDocument): Product {
++/** Option types of a second-hand one-time purchase (Used, Renewed, Amazon Warehouse / Resale). */
++const SECOND_HAND = new Set(['USED', 'RENEWED', 'REFURBISHED', 'WAREHOUSE', 'RESALE']);
++function read(document: PageDocument, issues: string[]): Product {
+   const challenge = amazonPageChallenge(document.url, 200, document.html);
+   check(!challenge, challenge ?? 'Amazon verification page');
+   const requested = asin(document.requestedUrl ?? document.url);
+@@ -179,7 +189,9 @@ function read(document: PageDocument): Product {
+     );
+   }
+   const title = textAt(root, mobile ? '#title' : '#productTitle');
+-  check(title && !NON_NEW.test(title), 'Amazon title is missing or product is not new');
++  check(title, 'Amazon title is missing');
++  // A Renewed or Used listing is its own ASIN; its title states the condition of what it sells.
++  const listed = conditionInText(title);
+   const purchaseRegion = mobile ? '#mobile_buybox_feature_div' : '#desktop_buybox';
+   const boxes = all(root, `${purchaseRegion} #buybox`);
+   const candidates = boxes.length ? boxes : all(root, purchaseRegion);
+@@ -192,89 +204,140 @@ function read(document: PageDocument): Product {
+   const rows = all(box, '[data-a-accordion-row-name]').filter((row) =>
+     one(row, '[data-csa-c-buying-option-type]'),
+   );
+-  const newRows = rows.filter((row) => {
++  // Every one-time purchase row is collected with its condition: new rows, and used / renewed / warehouse
++  // rows. Subscriptions, membership upsells and other typed rows are not item prices and are skipped.
++  type Entry = {
++    region: ReturnType<typeof all>[number];
++    kind: 'new' | 'second-hand' | 'featured';
++    type?: string;
++  };
++  const typed = rows.flatMap((row): Entry[] => {
+     const types = values(row, '[data-csa-c-buying-option-type]', 'data-csa-c-buying-option-type');
+-    return types.length > 0 && types.every((type) => NEW_PURCHASE.has(type));
++    if (types.length && types.every((type) => NEW_PURCHASE.has(type)))
++      return [{ region: row, kind: 'new' as const }];
++    if (types.length && types.every((type) => SECOND_HAND.has(type)))
++      return [{ region: row, kind: 'second-hand' as const, type: types[0] }];
++    return [];
+   });
+-  const regions = rows.length
+-    ? newRows
++  const newRows = typed.filter((row) => row.kind === 'new');
++  check(newRows.length <= 1, 'Amazon new one-time purchase option is ambiguous');
++  const regions: Entry[] = rows.length
++    ? typed
+     : all(root, '#newAccordionRow_0').length
+-      ? all(root, '#newAccordionRow_0')
+-      : [box];
+-  check(regions.length === 1, 'Amazon new one-time purchase option is ambiguous');
+-  const region = regions[0];
+-  // Device pages (Kindle, Echo, Fire) buy through a buy-now form instead of the cart inputs.
+-  const identities = [
+-    ...new Set(
+-      values(
+-        region,
+-        mobile
+-          ? 'input[name="items[0.base][asin]"], form#buyNow input[name="asin"]'
+-          : 'input[name="ASIN"]',
+-        'value',
+-      ),
+-    ),
+-  ];
+-  check(
+-    identities.length === 1 && identities[0] === expected,
+-    'Amazon purchase option ASIN is unconfirmed',
+-  );
+-  const condition =
+-    textAt(region, '#conditionInfoFeature_feature_div') +
+-    ' ' +
+-    textAt(region, '.accordion-caption .a-text-bold');
+-  check(
+-    !NON_NEW.test(condition) && !/subscribe|subscription|prime.member/i.test(condition),
+-    'Amazon purchase option is not an ordinary new offer',
+-  );
+-  const currencies = [
+-    ...values(root, '#attach-currency-of-preference, #currencyOfPreference', 'value'),
+-    ...values(region, 'input[name$="[customerVisiblePrice][currencyCode]"]', 'value'),
+-  ];
+-  check(
+-    currencies.every((v) => v === 'CAD'),
+-    'Amazon display currency conflicts with Canadian storefront',
+-  );
+-  const rowName = region.attribs['data-a-accordion-row-name'];
+-  const prices = labels(region, '.apex-pricetopay-value');
+-  if (!prices.length) prices.push(...labels(region, '.offer-price'));
+-  const centers = mobile
+-    ? // Single-offer mobile pages show the price only in the main price display;
+-      // the buy box then holds just a quantity subtotal.
+-      rows.length || prices.length
+-      ? []
+-      : all(root, '#corePriceDisplay_mobile_feature_div').filter((n) => !hidden(n))
+-    : rows.length
+-      ? all(root, '[id]').filter((n) => n.attribs.id === `apex_desktop_${rowName}`)
+-      : all(root, '#apex_desktop').filter((n) => !one(n, '[id^="apex_desktop_"]'));
+-  check(centers.length <= 1, 'Ambiguous Amazon price center');
+-  const center = centers[0];
+-  if (center) prices.push(...labels(center, '.apex-pricetopay-value, .apexPriceToPay'));
+-  const current = requireValue(uniquePrice(prices, true), 'Missing Amazon price');
+-  const references = labels(
+-    region,
+-    '.a-text-price:not(.apex-priceperunit-value):not([data-a-color="price"])',
+-  );
+-  if (mobile) references.push(...labels(region, '.apex-basisprice-value'));
+-  if (center)
+-    references.push(
+-      ...labels(
+-        center,
+-        '.apex-basisprice-value, table.a-lineitem .a-text-price[data-a-strike="true"]',
++      ? [{ region: all(root, '#newAccordionRow_0')[0], kind: 'new' as const }]
++      : [{ region: box, kind: 'featured' as const }];
++  check(regions.length > 0, 'Amazon new one-time purchase option is ambiguous');
++  const currencies = values(root, '#attach-currency-of-preference, #currencyOfPreference', 'value');
++  const offerOf = (entry: Entry): Offer => {
++    const region = entry.region;
++    // Device pages (Kindle, Echo, Fire) buy through a buy-now form instead of the cart inputs.
++    const identities = [
++      ...new Set(
++        values(
++          region,
++          mobile
++            ? 'input[name="items[0.base][asin]"], form#buyNow input[name="asin"]'
++            : 'input[name="ASIN"]',
++          'value',
++        ),
+       ),
++    ];
++    check(
++      identities.length === 1 && identities[0] === expected,
++      'Amazon purchase option ASIN is unconfirmed',
++    );
++    const stated =
++      textAt(region, '#conditionInfoFeature_feature_div') +
++      ' ' +
++      textAt(region, '.accordion-caption .a-text-bold');
++    check(
++      !/subscribe|subscription|prime.member/i.test(stated),
++      'Amazon purchase option is not a one-time purchase',
++    );
++    const condition: Condition | undefined =
++      entry.kind === 'second-hand'
++        ? (conditionInText(stated) ?? (entry.type === 'RENEWED' ? 'renewed' : 'used'))
++        : entry.kind === 'new'
++          ? (listed ?? 'new')
++          : (conditionInText(stated) ?? listed ?? 'new');
++    const regionCurrencies = values(
++      region,
++      'input[name$="[customerVisiblePrice][currencyCode]"]',
++      'value',
++    );
++    check(
++      [...currencies, ...regionCurrencies].every((v) => v === 'CAD'),
++      'Amazon display currency conflicts with Canadian storefront',
+     );
+-  const former = uniquePrice(references, false);
+-  check(former == null || former >= current, 'Amazon reference price is below current price');
+-  const seller =
+-    textAt(region, '#merchantInfoFeature_feature_div .offer-display-feature-text-message') ||
+-    textAt(region, '#sellerProfileTriggerId') ||
+-    textAt(region, '#merchant-info a[href*="seller="]');
+-  const stock = textAt(region, '#availability') || textAt(region, '#outOfStock');
++    const rowName = region.attribs['data-a-accordion-row-name'];
++    const prices = labels(region, '.apex-pricetopay-value');
++    if (!prices.length) prices.push(...labels(region, '.offer-price'));
++    const centers = mobile
++      ? // Single-offer mobile pages show the price only in the main price display;
++        // the buy box then holds just a quantity subtotal.
++        rows.length || prices.length
++        ? []
++        : all(root, '#corePriceDisplay_mobile_feature_div').filter((n) => !hidden(n))
++      : rows.length
++        ? all(root, '[id]').filter((n) => n.attribs.id === `apex_desktop_${rowName}`)
++        : all(root, '#apex_desktop').filter((n) => !one(n, '[id^="apex_desktop_"]'));
++    check(centers.length <= 1, 'Ambiguous Amazon price center');
++    const center = centers[0];
++    if (center) prices.push(...labels(center, '.apex-pricetopay-value, .apexPriceToPay'));
++    const current = requireValue(uniquePrice(prices, true), 'Missing Amazon price');
++    const references = labels(
++      region,
++      '.a-text-price:not(.apex-priceperunit-value):not([data-a-color="price"])',
++    );
++    if (mobile) references.push(...labels(region, '.apex-basisprice-value'));
++    if (center)
++      references.push(
++        ...labels(
++          center,
++          '.apex-basisprice-value, table.a-lineitem .a-text-price[data-a-strike="true"]',
++        ),
++      );
++    const former = uniquePrice(references, false);
++    check(former == null || former >= current, 'Amazon reference price is below current price');
++    const seller =
++      textAt(region, '#merchantInfoFeature_feature_div .offer-display-feature-text-message') ||
++      textAt(region, '#sellerProfileTriggerId') ||
++      textAt(region, '#merchant-info a[href*="seller="]');
++    const stock = textAt(region, '#availability') || textAt(region, '#outOfStock');
++    const evidence = `${purchaseRegion}/${rowName ?? 'featured'}${center ? ` + #${center.attribs.id}` : ''}`;
++    const promotions = pagePromotions(root, region, entry.kind !== 'second-hand');
++    return {
++      amountMinor: current,
++      ...(former != null && former > current
++        ? { compareAtAmountMinor: former, compareAtEvidence: `${evidence}/reference-price` }
++        : {}),
++      currency: 'CAD',
++      currencyEvidence:
++        currencies.length || regionCurrencies.length
++          ? '#currencyOfPreference / purchase option'
++          : 'storefront:amazon.ca',
++      url: `https://www.amazon.ca/dp/${expected}`,
++      seller: seller || undefined,
++      availability: amazonStock(stock),
++      ...(condition ? { condition } : {}),
++      ...(promotions.length ? { promotions } : {}),
++      evidence,
++    };
++  };
++  // The featured offer decides the product: the new row when there is one, else the first second-hand row.
++  const primary = newRows[0] ?? regions[0];
++  const offers = [offerOf(primary)];
++  for (const entry of regions)
++    if (entry !== primary)
++      try {
++        offers.push(offerOf(entry));
++      } catch (error) {
++        issues.push(`Amazon ${entry.type ?? 'other'} offer skipped: ${(error as Error).message}`);
++      }
++  offers.push(...otherOffers(root, expected, issues));
+   const selection = selectedVariant(root, expected);
+-  const promotions = pagePromotions(root, region);
+   const stars = pageRating(root);
+   const url = `https://www.amazon.ca/dp/${expected}`;
+-  const evidence = `${purchaseRegion}/${rowName ?? 'featured'}${center ? ` + #${center.attribs.id}` : ''}`;
+   const image = one(root, mobile ? '#main-image' : '#landingImage');
+   // The mobile gallery: one carousel item per slide, in order, naming its image even before the slide has loaded
+   // (unloaded slides hold only loader images). Videos are skipped; any image id is served at full size as SL1500.
+@@ -302,30 +365,44 @@ function read(document: PageDocument): Product {
+     ),
+     description: textAt(root, '#feature-bullets') || undefined,
+     evidence: mobile ? 'canonical + #title + purchase option ASIN' : '#ASIN + #productTitle',
+-    offers: [
+-      {
+-        amountMinor: current,
+-        ...(former != null && former > current
+-          ? {
+-              compareAtAmountMinor: former,
+-              compareAtEvidence: `${evidence}/reference-price`,
+-            }
+-          : {}),
+-        currency: 'CAD',
+-        currencyEvidence: currencies.length
+-          ? '#currencyOfPreference / purchase option'
+-          : 'storefront:amazon.ca',
+-        url,
+-        seller: seller || undefined,
+-        availability: amazonStock(stock),
+-        // Only an ordinary new offer reaches here (used, renewed and subscription offers are refused above).
+-        condition: 'new',
+-        ...(promotions.length ? { promotions } : {}),
+-        evidence,
+-      },
+-    ],
++    offers,
+   };
+ }
++/**
++ * The "All offers" panel (AOD) when the captured page holds it open: each offer's own condition heading
++ * ("Used - Like New", "Renewed", "New"), price and seller. An offer is kept only when its own add-to-cart names
++ * this ASIN and its price reads as one CAD amount; anything else is skipped, never guessed. The pinned offer
++ * repeats the featured one and is not read again.
++ */
++function otherOffers(root: HtmlNode, expected: string, issues: string[]): Offer[] {
++  const list = all(root, '#aod-offer-list #aod-offer');
++  const offers: Offer[] = [];
++  list.forEach((node, index) => {
++    const evidence = `#aod-offer-list #aod-offer[${index}]`;
++    const ids = [
++      ...new Set(values(node, 'input[name="items[0.base][asin]"], input[name="ASIN"]', 'value')),
++    ];
++    const heading = textAt(node, '#aod-offer-heading');
++    const amount = uniquePrice(labels(node, '.a-price:not(.a-text-price)'), true);
++    const condition = /^\s*new\b/i.test(heading) ? 'new' : conditionInText(heading);
++    if (ids.length !== 1 || ids[0] !== expected || amount == null || !condition) {
++      issues.push(`Amazon other offer ${index + 1} skipped: identity, condition or price unclear`);
++      return;
++    }
++    const seller =
++      textAt(node, '#aod-offer-soldBy a') || textAt(node, '#aod-offer-soldBy .a-col-right');
++    offers.push({
++      amountMinor: amount,
++      currency: 'CAD',
++      currencyEvidence: 'storefront:amazon.ca',
++      url: `https://www.amazon.ca/dp/${expected}`,
++      ...(seller ? { seller } : {}),
++      condition,
++      evidence,
++    });
++  });
++  return offers;
++}
+ /** The buy box's stock line; a line it does not recognise stays unknown. */
+ function amazonStock(stock: string): string | undefined {
+   if (/temporarily out of stock/i.test(stock) && /order now|deliver/i.test(stock))
+diff --git a/apps/worker/src/parsing/parsers/retailers/bestbuy.ts b/apps/worker/src/parsing/parsers/retailers/bestbuy.ts
+index b4461ca..8d0908c 100644
+--- a/apps/worker/src/parsing/parsers/retailers/bestbuy.ts
++++ b/apps/worker/src/parsing/parsers/retailers/bestbuy.ts
+@@ -22,9 +22,16 @@ import {
+   oneOrMany,
+   merchantUrl,
+   parseRetailer,
+-  NON_NEW,
+ } from '../shared/retailer.ts';
+-import { aggregateRating, promotion, rating, variant } from '../shared/facts.ts';
++import {
++  aggregateRating,
++  conditionInText,
++  promotion,
++  rating,
++  schemaCondition,
++  variant,
++} from '../shared/facts.ts';
++import type { Condition } from '../types.ts';
+ 
+ function sku(url: string): string {
+   const path = merchantUrl(url, 'bestbuy.ca').pathname;
+@@ -102,11 +109,15 @@ function read(document: PageDocument, issues: string[]): Product {
+         (!text(seller.name) || ['Best Buy', 'Best Buy Canada'].includes(String(seller.name))),
+       'Conflicting Best Buy seller',
+     );
++  // A Best Buy SKU is one seller's item in one condition: its stated grade ("Brand New", "Open Box",
++  // "Refurbished (Excellent)", "Used - Good") or, ungraded, the title's words. An ungraded first-party item is
++  // Best Buy's new item; an ungraded Marketplace item has no stated condition (as morydeals-price reads it).
+   const grade = text(product.grade);
+-  check(
+-    !NON_NEW.test(title) && (grade ? /^(new|brand new)$/i.test(grade) : !marketplace),
+-    'Best Buy condition is not confirmed new',
+-  );
++  const condition: Condition | undefined = grade
++    ? /^(new|brand new)$/i.test(grade)
++      ? 'new'
++      : (conditionInText(grade) ?? 'used')
++    : (conditionInText(title) ?? (marketplace ? undefined : 'new'));
+   check(
+     [product.currency, product.currencyCode, product.priceCurrency].every(
+       (value) => value == null || value === 'CAD',
+@@ -178,8 +189,7 @@ function read(document: PageDocument, issues: string[]): Product {
+         currencyEvidence: 'storefront:bestbuy.ca',
+         seller: sellerName,
+         availability: stock,
+-        // The grade check above admits only new items.
+-        condition: 'new',
++        ...(condition ? { condition } : {}),
+         ...(sale ? { promotions: [sale] } : {}),
+         url,
+         evidence: `${evidence}.salePrice|priceWithoutEhf|regularPrice`,
+@@ -227,11 +237,12 @@ function renderedProduct(
+     'Best Buy selected SKU mismatch',
+   );
+   const title = requireValue(text(product.name), 'Missing Best Buy product title');
+-  check(!NON_NEW.test(title), 'Best Buy condition is not confirmed new');
+   const offered = product.offers;
+   const offers = (Array.isArray(offered) ? offered : offered ? [offered] : []).map(record);
+   check(offers.length === 1, 'Best Buy offer missing or ambiguous');
+   check(offers[0].priceCurrency === 'CAD', 'Best Buy price currency mismatch');
++  // The rendered offer's itemCondition, else the title's words; Best Buy's own unmarked item is new.
++  const condition = schemaCondition(offers[0].itemCondition) ?? conditionInText(title) ?? 'new';
+   const url = `https://www.bestbuy.ca/en-ca/product/${expected}`;
+   const evidence = 'script#product-json-ld';
+   const current = amount(offers[0].price, 'CAD');
+@@ -258,6 +269,7 @@ function renderedProduct(
+         currencyEvidence: `${evidence}.offers.priceCurrency`,
+         ...renderedSaving(root, current),
+         availability: schemaAvailability[String(offers[0].availability)],
++        condition,
+         url,
+         evidence: `${evidence}.offers.price`,
+       },
+diff --git a/apps/worker/src/parsing/parsers/retailers/newegg.ts b/apps/worker/src/parsing/parsers/retailers/newegg.ts
+index 38a1776..fd426de 100644
+--- a/apps/worker/src/parsing/parsers/retailers/newegg.ts
++++ b/apps/worker/src/parsing/parsers/retailers/newegg.ts
+@@ -1,4 +1,5 @@
+-import type { PageDocument, Product } from '../types.ts';
++import type { Condition, PageDocument, Product } from '../types.ts';
++import { conditionInText } from '../shared/facts.ts';
+ import {
+   all,
+   assignedJson,
+@@ -19,9 +20,14 @@ import {
+   imageUrls,
+   merchantUrl,
+   parseRetailer,
+-  NON_NEW,
+ } from '../shared/retailer.ts';
+ 
++/** Newegg's own flags (open box, refurbished, new) or the title's words; nothing stated stays unknown. */
++function neweggCondition(feature: Record<string, unknown>, title: string): Condition | undefined {
++  if (feature.IsOpenBoxed === true) return 'open_box';
++  if (feature.IsRefurbished === true) return 'renewed';
++  return conditionInText(title) ?? (feature.IsNew === true ? 'new' : undefined);
++}
+ function canonical(value: unknown): string | undefined {
+   const candidate = text(value)?.toUpperCase();
+   if (!candidate) return;
+@@ -101,13 +107,7 @@ function read(document: PageDocument, issues: string[]): Product {
+   const description = record(item.Description);
+   const title = requireValue(text(description.Title), 'Missing Newegg title');
+   const feature = record(item.Feature);
+-  check(
+-    feature.IsNew === true &&
+-      feature.IsRefurbished !== true &&
+-      feature.IsOpenBoxed !== true &&
+-      !NON_NEW.test(title),
+-    'Newegg condition is not confirmed new',
+-  );
++  const condition = neweggCondition(feature, title);
+   const currency = requireValue(
+     text(record(site.currency).currencyCode),
+     'Missing Newegg currency',
+@@ -155,6 +155,7 @@ function read(document: PageDocument, issues: string[]): Product {
+     evidence,
+     offers: [
+       {
++        ...(condition ? { condition } : {}),
+         amountMinor: current,
+         ...compareAt(
+           item.OriginalUnitPrice,
+@@ -205,13 +206,7 @@ function readMobile(root: HtmlNode, initial: Record<string, unknown>, expected:
+   const description = record(item.Description);
+   const title = requireValue(text(description.Title), 'Missing Newegg title');
+   const feature = record(item.Feature);
+-  check(
+-    feature.IsNew === true &&
+-      feature.IsRefurbished !== true &&
+-      feature.IsOpenBoxed !== true &&
+-      !NON_NEW.test(title),
+-    'Newegg condition is not confirmed new',
+-  );
++  const condition = neweggCondition(feature, title);
+   const price = record(item.Price);
+   check(price.CurrencyCode === 'CAD', 'Newegg currency mismatch');
+   const current = amount(price.FinalPrice, 'CAD');
+@@ -283,6 +278,7 @@ function readMobile(root: HtmlNode, initial: Record<string, unknown>, expected:
+     evidence,
+     offers: [
+       {
++        ...(condition ? { condition } : {}),
+         amountMinor: current,
+         ...(original !== undefined && original > current
+           ? { compareAtAmountMinor: original, compareAtEvidence: `${evidence}.OriginalPriceText` }
+diff --git a/apps/worker/src/parsing/parsers/retailers/walmart.ts b/apps/worker/src/parsing/parsers/retailers/walmart.ts
+index 417dfb2..b240047 100644
+--- a/apps/worker/src/parsing/parsers/retailers/walmart.ts
++++ b/apps/worker/src/parsing/parsers/retailers/walmart.ts
+@@ -159,10 +159,7 @@ function renderedProduct(root: HtmlNode, url: URL, expected: string): Product {
+     typeof offer.url === 'string' && itemId(offer.url) === expected,
+     'Walmart selected item mismatch',
+   );
+-  check(
+-    offer.itemCondition == null || offer.itemCondition === 'https://schema.org/NewCondition',
+-    'Walmart offer is not new',
+-  );
++  // Every condition is collected; the offer carries the one it states (itemCondition).
+   check(offer.priceCurrency === 'CAD', 'Walmart current price currency mismatch');
+   const evidence = 'script[data-seo-id="schema-org-product"]';
+   const stars = aggregateRating(product.aggregateRating, `${evidence}.aggregateRating`);
+diff --git a/apps/worker/src/parsing/parsers/shared/facts.ts b/apps/worker/src/parsing/parsers/shared/facts.ts
+index 8897f70..c7d01ad 100644
+--- a/apps/worker/src/parsing/parsers/shared/facts.ts
++++ b/apps/worker/src/parsing/parsers/shared/facts.ts
+@@ -234,6 +234,10 @@ function canonical(product: Product): Product {
+       ...(promotions.length ? { promotions } : {}),
+     };
+   });
++  // The first offer is the product's primary price: a new (or unstated) offer when there is one, so a used or
++  // renewed price never stands in for the new one. Order is otherwise kept (a parser lists the featured first).
++  const primary = offers.findIndex((offer) => !offer.condition || offer.condition === 'new');
++  if (primary > 0) offers.unshift(...offers.splice(primary, 1));
+   return { ...product, url: identityUrl(product.url), offers };
+ }
+ /**
+diff --git a/apps/worker/src/parsing/parsers/version.ts b/apps/worker/src/parsing/parsers/version.ts
+index c665d23..2fb3338 100644
+--- a/apps/worker/src/parsing/parsers/version.ts
++++ b/apps/worker/src/parsing/parsers/version.ts
+@@ -1 +1 @@
+-export const PARSER_VERSION = '3.13.0';
++export const PARSER_VERSION = '3.14.0';
+diff --git a/apps/worker/test/fixtures/retailers/README.md b/apps/worker/test/fixtures/retailers/README.md
+index 03621fd..6b6b8b8 100644
+--- a/apps/worker/test/fixtures/retailers/README.md
++++ b/apps/worker/test/fixtures/retailers/README.md
+@@ -17,3 +17,7 @@ The Storefront query in this project reads one `node(ProductVariant)` and its
+ parent identity. It does not copy that PR's variants connection or pagination.
+ Shopify unit responses are synthetic. The live Shokz verification is documented
+ separately in `docs/crawler/retailer-verification.md`.
++
++`amazon-conditions-synthetic-B0CHX1W1XY.html` is synthetic (written for this project, not a capture): a reduced
++desktop accordion buy box (new, used and Subscribe & Save rows) and an open "All offers" panel, to test that every
++condition is collected and kept apart.
+diff --git a/apps/worker/test/fixtures/retailers/amazon-conditions-synthetic-B0CHX1W1XY.html b/apps/worker/test/fixtures/retailers/amazon-conditions-synthetic-B0CHX1W1XY.html
+new file mode 100644
+index 0000000..d414ed6
+--- /dev/null
++++ b/apps/worker/test/fixtures/retailers/amazon-conditions-synthetic-B0CHX1W1XY.html
+@@ -0,0 +1,86 @@
++<!-- Synthetic, reduced desktop Amazon.ca page (not a live capture): the accordion buy box with a new, a used and
++     a Subscribe & Save row, plus the "All offers" (AOD) panel held open with renewed, used and new offers and one
++     offer for another ASIN. Markup follows the ids and attributes the live desktop layout uses. -->
++<html>
++  <head>
++    <link rel="canonical" href="https://www.amazon.ca/dp/B0CHX1W1XY" />
++  </head>
++  <body>
++    <input type="hidden" id="ASIN" value="B0CHX1W1XY" />
++    <span id="productTitle">Apple AirPods Pro (2nd generation) with MagSafe Case (USB-C)</span>
++    <div id="averageCustomerReviews">
++      <span id="acrPopover" title="4.7 out of 5 stars"></span
++      ><span id="acrCustomerReviewText">12,408 ratings</span>
++    </div>
++    <img id="landingImage" src="https://m.media-amazon.com/images/I/61SUj2aKoEL._AC_SX466_.jpg" />
++    <div id="desktop_buybox">
++      <div id="buybox">
++        <div id="newAccordionRow_0" data-a-accordion-row-name="newAccordionRow_0">
++          <span data-csa-c-buying-option-type="NEW"></span>
++          <input type="hidden" name="ASIN" value="B0CHX1W1XY" />
++          <input
++            type="hidden"
++            name="items[0.base][customerVisiblePrice][currencyCode]"
++            value="CAD"
++          />
++          <div class="accordion-caption"><span class="a-text-bold">Buy new:</span></div>
++          <span class="apex-pricetopay-value"><span class="a-offscreen">$299.00</span></span>
++          <span class="a-text-price" data-a-strike="true"
++            ><span class="a-offscreen">$329.00</span></span
++          >
++          <div id="availability"><span>In Stock</span></div>
++          <div id="merchantInfoFeature_feature_div">
++            <span class="offer-display-feature-text-message">Amazon.ca</span>
++          </div>
++        </div>
++        <div id="usedAccordionRow" data-a-accordion-row-name="usedAccordionRow">
++          <span data-csa-c-buying-option-type="USED"></span>
++          <input type="hidden" name="ASIN" value="B0CHX1W1XY" />
++          <input
++            type="hidden"
++            name="items[0.base][customerVisiblePrice][currencyCode]"
++            value="CAD"
++          />
++          <div class="accordion-caption">
++            <span class="a-text-bold">Save with Used - Very Good</span>
++          </div>
++          <span class="offer-price">$239.15</span>
++          <div id="merchantInfoFeature_feature_div">
++            <span class="offer-display-feature-text-message">Amazon Resale</span>
++          </div>
++        </div>
++        <div data-a-accordion-row-name="snsAccordionRowMiddle">
++          <span data-csa-c-buying-option-type="SNS"></span>
++          <span class="apex-pricetopay-value"><span class="a-offscreen">$284.05</span></span>
++        </div>
++      </div>
++    </div>
++    <div id="aod-container">
++      <div id="aod-offer-list">
++        <div id="aod-offer">
++          <div id="aod-offer-heading"><h5>Renewed</h5></div>
++          <span class="a-price"><span class="a-offscreen">$219.99</span></span>
++          <div id="aod-offer-soldBy"><a href="/gp/aag/main?seller=A1">Tech Renewed Canada</a></div>
++          <form><input type="hidden" name="items[0.base][asin]" value="B0CHX1W1XY" /></form>
++        </div>
++        <div id="aod-offer">
++          <div id="aod-offer-heading"><h5>Used - Acceptable</h5></div>
++          <span class="a-price"><span class="a-offscreen">$198.50</span></span>
++          <div id="aod-offer-soldBy"><a href="/gp/aag/main?seller=A2">Second Life Audio</a></div>
++          <form><input type="hidden" name="items[0.base][asin]" value="B0CHX1W1XY" /></form>
++        </div>
++        <div id="aod-offer">
++          <div id="aod-offer-heading"><h5>New</h5></div>
++          <span class="a-price"><span class="a-offscreen">$304.99</span></span>
++          <div id="aod-offer-soldBy"><a href="/gp/aag/main?seller=A3">Gadget Hub CA</a></div>
++          <form><input type="hidden" name="items[0.base][asin]" value="B0CHX1W1XY" /></form>
++        </div>
++        <div id="aod-offer">
++          <div id="aod-offer-heading"><h5>Used - Good</h5></div>
++          <span class="a-price"><span class="a-offscreen">$99.00</span></span>
++          <form><input type="hidden" name="items[0.base][asin]" value="B0OTHERASN" /></form>
++        </div>
++      </div>
++    </div>
++  </body>
++</html>
+diff --git a/apps/worker/test/unit/parsing/parsers/conditions.test.ts b/apps/worker/test/unit/parsing/parsers/conditions.test.ts
+new file mode 100644
+index 0000000..27b4ce2
+--- /dev/null
++++ b/apps/worker/test/unit/parsing/parsers/conditions.test.ts
+@@ -0,0 +1,115 @@
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import {
++  canonicalProducts,
++  parseAmazonProduct,
++  type PageDocument,
++} from '../../../../src/parsing/parsers/index.ts';
++
++const fixture = (name: string) =>
++  readFileSync(new URL(`../../../fixtures/retailers/${name}.html`, import.meta.url), 'utf8');
++const page = (url: string, html: string): PageDocument => ({
++  version: '1',
++  url,
++  requestedUrl: url,
++  fetchedAt: '2026-10-10T00:00:00Z',
++  markdown: '',
++  jsonLd: [],
++  metadata: {},
++  html,
++});
++const url = 'https://www.amazon.ca/dp/B0CHX1W1XY';
++
++test('Amazon collects the new, used and All-offers prices, each with its condition and seller', () => {
++  const result = parseAmazonProduct(page(url, fixture('amazon-conditions-synthetic-B0CHX1W1XY')));
++  assert.equal(result.status, 'parsed', result.issues.join('; '));
++  const offers = result.products[0].offers.map((o) => ({
++    condition: o.condition,
++    amount: o.amountMinor,
++    was: o.compareAtAmountMinor,
++    seller: o.seller,
++  }));
++  assert.deepEqual(offers, [
++    // The featured new offer stays first: it is the product's price.
++    { condition: 'new', amount: 29900, was: 32900, seller: 'Amazon.ca' },
++    { condition: 'used', amount: 23915, was: undefined, seller: 'Amazon Resale' },
++    { condition: 'renewed', amount: 21999, was: undefined, seller: 'Tech Renewed Canada' },
++    { condition: 'used', amount: 19850, was: undefined, seller: 'Second Life Audio' },
++    { condition: 'new', amount: 30499, was: undefined, seller: 'Gadget Hub CA' },
++  ]);
++  // The subscription row is no item price, and the offer for another ASIN is skipped with a note.
++  assert.ok(!offers.some((o) => o.amount === 28405 || o.amount === 9900));
++  assert.ok(result.issues.some((issue) => /other offer 4 skipped/.test(issue)));
++});
++
++test('a page whose only featured offer is used is collected as used, never as a new price', () => {
++  const html = fixture('amazon-conditions-synthetic-B0CHX1W1XY')
++    .replace(
++      /<div id="newAccordionRow_0"[\s\S]*?<\/div>\s*<\/div>\s*<div id="usedAccordionRow"/,
++      '<div id="usedAccordionRow"',
++    )
++    .replace(/<div id="aod-container">[\s\S]*$/, '</body></html>');
++  const result = parseAmazonProduct(page(url, html));
++  assert.equal(result.status, 'parsed', result.issues.join('; '));
++  assert.deepEqual(
++    result.products[0].offers.map((o) => [o.condition, o.amountMinor]),
++    [['used', 23915]],
++  );
++});
++
++test('a Renewed listing (its own ASIN) is a renewed offer', () => {
++  const html = fixture('amazon-single-B0FF3549YB');
++  const title = /<span id="productTitle"[^>]*>([^<]*)</.exec(html)?.[1] ?? '';
++  const renewed = html.replace(title, `${title.trim()} (Renewed)`);
++  const result = parseAmazonProduct(page('https://www.amazon.ca/dp/B0FF3549YB', renewed));
++  assert.equal(result.status, 'parsed', result.issues.join('; '));
++  assert.equal(result.products[0].offers[0].condition, 'renewed');
++});
++
++test('real captured Amazon pages keep one featured new offer', () => {
++  for (const [name, asin] of [
++    ['amazon-single-B0FF3549YB', 'B0FF3549YB'],
++    ['amazon-price-table-B0CTMRXCTG', 'B0CTMRXCTG'],
++  ]) {
++    const result = parseAmazonProduct(page(`https://www.amazon.ca/dp/${asin}`, fixture(name)));
++    assert.equal(result.status, 'parsed');
++    assert.deepEqual(
++      result.products[0].offers.map((o) => o.condition),
++      ['new'],
++    );
++  }
++});
++
++test('the stored first offer is new whenever the page has a new offer', () => {
++  const offer = (condition: 'new' | 'used' | 'renewed' | undefined, amountMinor: number) => ({
++    amountMinor,
++    currency: 'CAD',
++    currencyEvidence: 'e',
++    ...(condition ? { condition } : {}),
++    evidence: 'e',
++  });
++  const result = canonicalProducts({
++    parserVersion: 'test',
++    strategy: 'schema-org',
++    status: 'parsed',
++    issues: [],
++    products: [
++      {
++        url: 'https://shop.example/p',
++        title: 'P',
++        images: [],
++        evidence: 'e',
++        offers: [offer('used', 500), offer('renewed', 600), offer(undefined, 900)],
++      },
++    ],
++  });
++  assert.deepEqual(
++    result.products[0].offers.map((o) => [o.condition, o.amountMinor]),
++    [
++      [undefined, 900],
++      ['used', 500],
++      ['renewed', 600],
++    ],
++  );
++});
+diff --git a/apps/worker/test/unit/parsing/parsers/mobile-captures.test.ts b/apps/worker/test/unit/parsing/parsers/mobile-captures.test.ts
+index 0766c04..cd15c49 100644
+--- a/apps/worker/test/unit/parsing/parsers/mobile-captures.test.ts
++++ b/apps/worker/test/unit/parsing/parsers/mobile-captures.test.ts
+@@ -213,10 +213,12 @@ test('a bundle product sells its one-time purchase as BUNDLE: still the new offe
+   const result = parseOffers(amazonMobileOffers.replaceAll('"NEW"', '"BUNDLE"'));
+   assert.deepEqual(result.issues, []);
+   assert.equal(result.products[0].offers[0].amountMinor, 1709);
+-  // A used or other-seller option is still not a new purchase.
+-  assert.equal(
+-    parseOffers(amazonMobileOffers.replaceAll('"NEW"', '"USED"')).status,
+-    'needs_review',
++  // A used option is collected as a used offer, never as the new price.
++  const used = parseOffers(amazonMobileOffers.replaceAll('"NEW"', '"USED"'));
++  assert.equal(used.status, 'parsed');
++  assert.deepEqual(
++    used.products[0].offers.map((o) => [o.condition, o.amountMinor]),
++    [['used', 1709]],
+   );
+ });
+ 
+@@ -368,10 +370,18 @@ test('Best Buy rendered fallback still refuses another product', () => {
+     assert.equal(parseBestBuyProduct(document(bestbuyUrl, html)).status, 'needs_review');
+   refused(bestbuyAfterNavigation((ld) => (ld.sku = '20099999')));
+   refused(bestbuyAfterNavigation((ld) => (ld.offers.priceCurrency = 'USD')));
+-  refused(bestbuyAfterNavigation((ld) => (ld.name = 'ASUS Vivobook 15 Laptop - Open Box')));
+   refused(bestbuyAfterNavigation().replace('Web Code: 20099717', 'Web Code: 20099999'));
+   // A state that does hold a product keeps its strict SKU check.
+   refused(bestbuyAfterNavigation(undefined, { sku: '20099999', name: 'Other' }));
++  // An open-box listing is collected as an open-box offer, not refused.
++  const openBox = parseBestBuyProduct(
++    document(
++      bestbuyUrl,
++      bestbuyAfterNavigation((ld) => (ld.name = 'ASUS Vivobook 15 Laptop - Open Box')),
++    ),
++  );
++  assert.equal(openBox.status, 'parsed');
++  assert.equal(openBox.products[0].offers[0].condition, 'open_box');
+ });
+ 
+ // The rendered page around the stale state: the product's gallery thumbnails and its own pricing block, beside a
+diff --git a/apps/worker/test/unit/parsing/parsers/retailers.test.ts b/apps/worker/test/unit/parsing/parsers/retailers.test.ts
+index 27ad754..9e6d910 100644
+--- a/apps/worker/test/unit/parsing/parsers/retailers.test.ts
++++ b/apps/worker/test/unit/parsing/parsers/retailers.test.ts
+@@ -97,7 +97,7 @@ test('Amazon purchase-region identity and display currency must match', () => {
+     /merchant/,
+   );
+ });
+-test('Amazon typed regions exclude used, membership and sibling prices', () => {
++test('Amazon typed regions keep new and used apart and exclude membership and sibling prices', () => {
+   const html = `<span id="productTitle">Selected item</span><input id="ASIN" value="B000000001">
+   <div id="desktop_buybox"><div id="buybox">
+     <div data-a-accordion-row-name="newRow"><span data-csa-c-buying-option-type="NEW"></span><input name="ASIN" value="B000000001"><span class="offer-price">$49.99</span></div>
+@@ -105,7 +105,13 @@ test('Amazon typed regions exclude used, membership and sibling prices', () => {
+     <div data-a-accordion-row-name="primeRow"><span data-csa-c-buying-option-type="PRIME_SAVINGS_UPSELL"></span><span class="offer-price">$1.00</span></div>
+   </div></div><div id="recommendations"><span class="apex-pricetopay-value">$2.00</span></div>`;
+   const doc = document('https://www.amazon.ca/dp/B000000001', html);
+-  assert.equal(parseAmazonProduct(doc).products[0].offers[0].amountMinor, 4999);
++  assert.deepEqual(
++    parseAmazonProduct(doc).products[0].offers.map((o) => [o.condition, o.amountMinor]),
++    [
++      ['new', 4999],
++      ['used', 999],
++    ],
++  );
+   refused(
+     parseAmazonProduct({
+       ...doc,
+@@ -141,7 +147,7 @@ test('Best Buy fixture with many variant neighbours produces only current SKU',
+   assert.equal(p.offers[0].availability, 'OutOfStock');
+   assert.ok(p.images.length > 1);
+ });
+-test('Best Buy stores a former price and refuses carrier, wrong SKU, used and seller conflicts', () => {
++test('Best Buy stores a former price and refuses carrier, wrong SKU and seller conflicts', () => {
+   const result = parseBestBuyProduct(
+     changeState(bb(), '__INITIAL_STATE__', (s) => {
+       s.product.product.salePrice = 699.99;
+@@ -156,9 +162,6 @@ test('Best Buy stores a former price and refuses carrier, wrong SKU, used and se
+     (s: PageState) => {
+       s.product.product.name = 'Phone Monthly Financing';
+     },
+-    (s: PageState) => {
+-      s.product.product.grade = 'Open Box';
+-    },
+     (s: PageState) => {
+       s.product.product.seller = { id: 'foreign', name: 'Other' };
+     },
+@@ -171,6 +174,27 @@ test('Best Buy stores a former price and refuses carrier, wrong SKU, used and se
+   ])
+     refused(parseBestBuyProduct(changeState(bb(), '__INITIAL_STATE__', mutate)));
+ });
++test('Best Buy collects open-box, refurbished, used and Marketplace SKUs with their stated condition', () => {
++  const graded = (grade: string | null, extra: Record<string, unknown> = {}) =>
++    parseBestBuyProduct(
++      changeState(bb(), '__INITIAL_STATE__', (s) => {
++        Object.assign(s.product.product, { grade, ...extra });
++      }),
++    ).products[0]?.offers[0]?.condition;
++  assert.equal(graded('Brand New'), 'new');
++  assert.equal(graded('Open Box'), 'open_box');
++  assert.equal(graded('Refurbished (Excellent)'), 'renewed');
++  assert.equal(graded('Used - Good'), 'used');
++  // Any other stated grade is second-hand, never new.
++  assert.equal(graded('Excellent'), 'used');
++  // Ungraded first-party is Best Buy's new item; ungraded Marketplace states nothing.
++  assert.equal(graded(null), 'new');
++  assert.equal(
++    graded(null, { isMarketplace: true, seller: { id: '5671', name: 'Kiani Distribution' } }),
++    undefined,
++  );
++  assert.equal(graded(null, { name: 'Refurbished Roku TV' }), 'renewed');
++});
+ test('Newegg parent path with explicit marketplace Item selects only that seller listing', () => {
+   const doc = document(
+     'https://www.newegg.ca/p/N82E16820147860?Item=9SIC7XMM4F0269',
+@@ -206,9 +230,6 @@ test('Newegg selected hardware ignores sibling amounts and refuses inconsistent
+     (s: PageState) => {
+       s.ItemDetail.Subscription = { SubscriptionOnly: true };
+     },
+-    (s: PageState) => {
+-      s.ItemDetail.Feature.IsRefurbished = true;
+-    },
+     (s: PageState) => {
+       s.PropertyCollection.PropertyGroups.push({
+         GroupDescription: 'Protection Plan',
+@@ -219,6 +240,18 @@ test('Newegg selected hardware ignores sibling amounts and refuses inconsistent
+     },
+   ])
+     refused(parseNeweggProduct(changeState(egg(), '__initialState__', mutate)));
++  // A refurbished or open-box listing is collected with its condition.
++  for (const [flag, condition] of [
++    ['IsRefurbished', 'renewed'],
++    ['IsOpenBoxed', 'open_box'],
++  ] as const) {
++    const result = parseNeweggProduct(
++      changeState(egg(), '__initialState__', (s) => {
++        s.ItemDetail.Feature[flag] = true;
++      }),
++    );
++    assert.equal(result.products[0].offers[0].condition, condition);
++  }
+ });
+ test('retailer JavaScript is never evaluated and ambiguous state is rejected', () => {
+   const doc = bb();

@@ -1,0 +1,2728 @@
+diff --git a/apps/api/src/feature/catalog/services/product-lookup.service.ts b/apps/api/src/feature/catalog/services/product-lookup.service.ts
+index 1355f49..e65af84 100644
+--- a/apps/api/src/feature/catalog/services/product-lookup.service.ts
++++ b/apps/api/src/feature/catalog/services/product-lookup.service.ts
+@@ -5,7 +5,9 @@ import { PrismaService } from "../../../core/database/services/prisma.service.ts
+ import {
+   ProductDataSchema,
+   conditionKey,
++  offerKey,
+   productFacts,
++  type OfferHistory,
+   type Product,
+ } from "../../products/schema/products.schema.ts";
+ import { identityUrl } from "@morydeals/capture-contracts";
+@@ -59,7 +61,10 @@ export class ProductLookupService {
+         const found =
+           candidates(url).find((candidate) => products.has(candidate)) ?? url;
+         const product = ProductDataSchema.safeParse(products.get(found));
+-        const series = history.get(found) ?? new Map<string, PricePoint[]>();
++        const series = history.get(found) ?? {
++          byCondition: new Map<string, PricePoint[]>(),
++          byOffer: new Map<string, PricePoint[]>(),
++        };
+         const shown = product.success
+           ? productFacts(product.data, { history: series })
+           : null;
+@@ -67,8 +72,8 @@ export class ProductLookupService {
+           url,
+           {
+             product: shown,
+-            // The primary offer's own condition: a used price never enters the new price's history.
+-            history: series.get(conditionKey(shown?.condition)) ?? [],
++            // The primary offer's own history (a used price never enters the new price's history).
++            history: shown?.offers[0].history ?? [],
+           },
+         ];
+       }),
+@@ -88,9 +93,10 @@ export class ProductLookupService {
+     return rows[0]?.url ?? null;
+   }
+   /**
+-   * Price history per condition. Keepa Buy Box points are new. Our captures give, per capture and condition, the
+-   * new series' featured offer (the lowest offer index: the price the page put first) and, for every other
+-   * condition, its lowest price ("used from"). An offer that states no condition is read with new.
++   * Price history, per offer. The primary offer's series is its condition's featured price: per capture, the new
++   * offer the page put first (the lowest offer index; Keepa Buy Box points are new too), or for another condition
++   * its lowest price. Every other offer has its own series: the prices of the same condition and seller.
++   * An offer that states no condition is read with new.
+    */
+   private async history(keys: string[]) {
+     const rows = await this.db.$queryRaw<
+@@ -99,45 +105,87 @@ export class ProductLookupService {
+         at: Date;
+         amount: bigint | null;
+         condition?: string | null;
++        seller?: string | null;
++        observation?: bigint | string | null;
++        offer_index?: number | null;
+       }[]
+     >(Prisma.sql`
+       SELECT * FROM (
+-        SELECT DISTINCT ON (p.url) p.url, e.observed_at AS at, e.amount_minor AS amount, 'new' AS condition
++        SELECT DISTINCT ON (p.url) p.url, e.observed_at AS at, e.amount_minor AS amount, 'new' AS condition,
++          NULL::text AS seller, NULL::bigint AS observation, NULL::int AS offer_index
+         FROM public.external_price_points e JOIN public.tracked_products p ON p.id = e.product_id
+         WHERE p.identity_key IN (${Prisma.join(keys)}) AND e.source = 'keepa' AND e.series = 'buy_box'
+           AND e.observed_at <= now() - interval '90 days'
+         ORDER BY p.url, e.observed_at DESC
+       ) before_window
+       UNION ALL
+-      SELECT p.url, e.observed_at, e.amount_minor, 'new'
++      SELECT p.url, e.observed_at, e.amount_minor, 'new', NULL, NULL, NULL
+       FROM public.external_price_points e JOIN public.tracked_products p ON p.id = e.product_id
+       WHERE p.identity_key IN (${Prisma.join(keys)}) AND e.source = 'keepa' AND e.series = 'buy_box'
+         AND e.observed_at > now() - interval '90 days'
+       UNION ALL
+-      SELECT url, at, amount, condition FROM (
+-        SELECT DISTINCT ON (o.id, COALESCE(po.condition, 'new'))
+-          p.url, o.observed_at AS at, po.amount_minor AS amount, COALESCE(po.condition, 'new') AS condition
+-        FROM public.price_observations po
+-        JOIN public.product_observations o ON o.id = po.observation_id
+-        JOIN public.tracked_products p ON p.id = o.product_id
+-        WHERE p.identity_key IN (${Prisma.join(keys)})
+-          AND o.observed_at > now() - interval '90 days'
+-        ORDER BY o.id, COALESCE(po.condition, 'new'),
+-          CASE WHEN COALESCE(po.condition, 'new') = 'new' THEN po.offer_index::bigint ELSE po.amount_minor END
+-      ) captured
++      SELECT p.url, o.observed_at, po.amount_minor, po.condition, po.seller, o.id, po.offer_index
++      FROM public.price_observations po
++      JOIN public.product_observations o ON o.id = po.observation_id
++      JOIN public.tracked_products p ON p.id = o.product_id
++      WHERE p.identity_key IN (${Prisma.join(keys)})
++        AND o.observed_at > now() - interval '90 days'
+       ORDER BY 2`);
+-    const byUrl = new Map<string, Map<string, PricePoint[]>>();
+-    for (const row of rows) {
+-      const series = byUrl.get(row.url) ?? new Map<string, PricePoint[]>();
++    // Per URL, per capture (Keepa points are each their own capture), the series' point.
++    type Pick = { at: string; amount: number | null; index: number };
++    const pick = new Map<string, Map<string, Map<string, Pick>>>();
++    const put = (
++      url: string,
++      kind: "c" | "o",
++      key: string,
++      capture: string,
++      point: Pick,
++      better: (a: Pick, b: Pick) => boolean,
++    ) => {
++      const byUrl = pick.get(url) ?? new Map<string, Map<string, Pick>>();
++      const series = byUrl.get(`${kind}${key}`) ?? new Map<string, Pick>();
++      const held = series.get(capture);
++      if (!held || better(point, held)) series.set(capture, point);
++      byUrl.set(`${kind}${key}`, series);
++      pick.set(url, byUrl);
++    };
++    const lower = (a: Pick, b: Pick) =>
++      a.amount !== null && (b.amount === null || a.amount < b.amount);
++    rows.forEach((row, n) => {
++      const at = new Date(row.at).toISOString();
++      const point = {
++        at,
++        amount: row.amount === null ? null : Number(row.amount),
++        index: row.offer_index ?? 0,
++      };
+       const condition = conditionKey(row.condition);
+-      const points = series.get(condition) ?? [];
+-      points.push({
+-        at: new Date(row.at).toISOString(),
+-        amountMinor: row.amount === null ? null : Number(row.amount),
+-      });
+-      series.set(condition, points);
+-      byUrl.set(row.url, series);
++      const capture =
++        row.observation == null ? `keepa:${n}` : String(row.observation);
++      put(row.url, "c", condition, capture, point, (a, b) =>
++        condition === "new" ? a.index < b.index : lower(a, b),
++      );
++      if (row.observation != null)
++        put(
++          row.url,
++          "o",
++          offerKey(row.condition, row.seller),
++          capture,
++          point,
++          lower,
++        );
++    });
++    const result = new Map<string, OfferHistory>();
++    for (const [url, all] of pick) {
++      const byCondition = new Map<string, PricePoint[]>();
++      const byOffer = new Map<string, PricePoint[]>();
++      for (const [key, captures] of all) {
++        const points = [...captures.values()]
++          .sort((a, b) => a.at.localeCompare(b.at))
++          .map((p) => ({ at: p.at, amountMinor: p.amount }));
++        (key[0] === "c" ? byCondition : byOffer).set(key.slice(1), points);
++      }
++      result.set(url, { byCondition, byOffer });
+     }
+-    return byUrl;
++    return result;
+   }
+ }
+diff --git a/apps/api/src/feature/products/schema/products.schema.ts b/apps/api/src/feature/products/schema/products.schema.ts
+index d53f095..8300ff1 100644
+--- a/apps/api/src/feature/products/schema/products.schema.ts
++++ b/apps/api/src/feature/products/schema/products.schema.ts
+@@ -40,19 +40,30 @@ export const PromotionSchema = z.object({
+   code: z.string().optional(),
+   /** A price the store itself states for this deal; never computed. */
+   effectiveMinor: z.number().int().positive().safe().optional(),
++  /** When the deal ends (UTC); never guessed. */
+   validUntil: z.iso.datetime().optional(),
++  /** The end was computed from the page's countdown plus the capture time (the offer's `observedAt`). */
++  validUntilEstimated: z.boolean().optional().catch(undefined),
++  /** The time-limited deal the store names. */
++  kind: z
++    .enum(["lightning", "deal_of_the_day", "limited_time"])
++    .optional()
++    .catch(undefined),
++  /** A Lightning Deal's share claimed, as the page states it. */
++  claimedPercent: z.number().min(0).max(100).optional().catch(undefined),
+ });
+-const OfferSchema = z.object({
++/** One stored offer as the worker keeps it. */
++const StoredOfferSchema = z.object({
+   amountMinor: z.number().int().positive().safe(),
+   compareAtAmountMinor: z.number().int().positive().safe().optional(),
+   currency: z.string().regex(/^[A-Z]{3}$/),
+-  /** schema.org ItemAvailability name, as stored; `availability` on the product is the normalized value. */
++  /** schema.org ItemAvailability name, as stored. */
+   availability: z.string().optional(),
+   condition: ConditionSchema.optional().catch(undefined),
+   promotions: z.array(PromotionSchema).optional().catch(undefined),
+   seller: z.string().optional(),
+ });
+-/** The product as the worker stores it (internal evidence is stripped). */
++/** Product-level facts: what the item is, whoever sells it. */
+ const ProductFieldsSchema = z.object({
+   url: CrawlTaskSchema.shape.url,
+   title: z.string().min(1),
+@@ -67,6 +78,7 @@ const ProductFieldsSchema = z.object({
+     })
+     .optional()
+     .catch(undefined),
++  /** The product's published rating and review count. */
+   rating: z
+     .object({
+       value: z.number().nonnegative(),
+@@ -76,7 +88,7 @@ const ProductFieldsSchema = z.object({
+     .refine((r) => r.value <= r.scale)
+     .optional()
+     .catch(undefined),
+-  /** When this product was last captured (from the product row; absent on a fresh parse). */
++  /** When this product was last captured: the capture time of the offers shown (absent on a fresh parse). */
+   observedAt: z.iso.datetime().optional(),
+ });
+ /**
+@@ -84,15 +96,21 @@ const ProductFieldsSchema = z.object({
+  * its condition; the first is the primary (new when the page has a new offer).
+  */
+ export const ProductDataSchema = ProductFieldsSchema.extend({
+-  offers: z.array(OfferSchema).min(1),
++  offers: z.array(StoredOfferSchema).min(1),
+ });
+ type ProductData = z.infer<typeof ProductDataSchema>;
+-type Offer = z.infer<typeof OfferSchema>;
++type StoredOffer = z.infer<typeof StoredOfferSchema>;
+ type PricePoint = z.infer<typeof PricePointSchema>;
++type Condition = z.infer<typeof ConditionSchema>;
+ /** The condition a price series is kept under: an offer that states none is read with new. */
+ export const conditionKey = (condition: string | null | undefined) =>
+   condition ?? "new";
+-const stockOf = (offer: Offer) => {
++/** An offer's identity across captures: its condition and its seller. */
++export const offerKey = (
++  condition: string | null | undefined,
++  seller: string | null | undefined,
++) => `${conditionKey(condition)}\n${seller ?? ""}`;
++const stockOf = (offer: StoredOffer) => {
+   const stock = offer.availability?.replace(/^https?:\/\/schema\.org\//, "");
+   return (
+     (stock &&
+@@ -102,91 +120,103 @@ const stockOf = (offer: Offer) => {
+     null
+   );
+ };
+-/** The cheapest offer of each condition other than the primary's ("Used from $X, Renewed from $Y"). */
+-export const OtherOfferSchema = z.object({
+-  condition: ConditionSchema,
++/**
++ * One offer: one price, with its own condition, seller, stock, deals (still running), deal end and price history.
++ */
++export const ProductOfferSchema = z.object({
+   amountMinor: z.number().int().positive().safe(),
+   compareAtAmountMinor: z.number().int().positive().safe().optional(),
+   currency: z.string().regex(/^[A-Z]{3}$/),
++  /** The stated condition; null when unstated (most stores sell new without saying so). */
++  condition: ConditionSchema.nullable(),
+   seller: z.string().optional(),
+   availability: AvailabilitySchema.nullable(),
++  /** Deals still running at response time; one past its end is never sent. */
+   deals: z.array(PromotionSchema),
+-  /** How many offers of this condition the page showed. */
+-  count: z.number().int().positive(),
+-  /** Up to 90 days of this condition's own prices (lowest per capture); absent when not looked up. */
++  /** When the soonest-ending running deal ends; null when no deal shows an end. */
++  dealEndsAt: z.iso.datetime().nullable(),
++  /** dealEndsAt came from the page's countdown and the capture time (`observedAt`), not from the store. */
++  dealEndsEstimated: z.boolean(),
++  /** Up to 90 days of this offer's own prices; absent when not looked up. */
+   history: z.array(PricePointSchema).optional(),
+ });
++export type ProductOffer = z.infer<typeof ProductOfferSchema>;
++/** Price series for one product: per condition (the primary's) and per offer (condition and seller). */
++export type OfferHistory = {
++  byCondition: ReadonlyMap<string, PricePoint[]>;
++  byOffer: ReadonlyMap<string, PricePoint[]>;
++};
++const CONDITION_ORDER: (Condition | null)[] = [
++  "new",
++  null,
++  "open_box",
++  "renewed",
++  "used",
++  "damaged",
++];
+ /**
+- * The shown offer's facts, normalized for the app: availability (null when the store does not say), condition
+- * (null when unstated) and the deals still running.
++ * The product as the app gets it: product facts plus every offer. The first offer is the primary one (new when
++ * the store has a new offer; else the one the page features); the rest follow by condition, then price.
+  */
+ export function productFacts(
+   product: ProductData,
+-  {
+-    now = Date.now(),
+-    history,
+-  }: { now?: number; history?: ReadonlyMap<string, PricePoint[]> } = {},
++  { now = Date.now(), history }: { now?: number; history?: OfferHistory } = {},
+ ): Product {
+-  // The primary offer keeps every existing field's meaning: the new offer when there is one.
+   const primary =
+     product.offers.find((offer) => conditionKey(offer.condition) === "new") ??
+     product.offers[0];
+-  const running = (offer: Offer) =>
+-    (offer.promotions ?? []).filter(
+-      (deal) => !deal.validUntil || Date.parse(deal.validUntil) > now,
++  const rest = product.offers
++    .filter((offer) => offer !== primary)
++    .sort(
++      (a, b) =>
++        CONDITION_ORDER.indexOf(a.condition ?? null) -
++          CONDITION_ORDER.indexOf(b.condition ?? null) ||
++        a.amountMinor - b.amountMinor,
+     );
+-  const groups = new Map<z.infer<typeof ConditionSchema>, Offer[]>();
+-  for (const offer of product.offers) {
+-    if (
+-      !offer.condition ||
+-      conditionKey(offer.condition) === conditionKey(primary.condition)
+-    )
+-      continue;
+-    // Only prices comparable with the primary one (same currency) are offered beside it.
+-    if (offer.currency !== primary.currency) continue;
+-    groups.set(offer.condition, [
+-      ...(groups.get(offer.condition) ?? []),
+-      offer,
+-    ]);
+-  }
+-  const otherOffers = [...groups].map(([condition, offers]) => {
+-    const cheapest = offers.reduce((a, b) =>
+-      b.amountMinor < a.amountMinor ? b : a,
++  const view = (offer: StoredOffer, isPrimary: boolean): ProductOffer => {
++    const deals = (offer.promotions ?? []).filter(
++      (deal) => !deal.validUntil || Date.parse(deal.validUntil) > now,
+     );
+-    const series = history?.get(condition);
++    const ending = deals
++      .filter((deal) => deal.validUntil)
++      .sort((a, b) => Date.parse(a.validUntil!) - Date.parse(b.validUntil!))[0];
++    const series = isPrimary
++      ? history?.byCondition.get(conditionKey(offer.condition))
++      : history?.byOffer.get(offerKey(offer.condition, offer.seller));
+     return {
+-      condition,
+-      amountMinor: cheapest.amountMinor,
+-      ...(cheapest.compareAtAmountMinor
+-        ? { compareAtAmountMinor: cheapest.compareAtAmountMinor }
++      amountMinor: offer.amountMinor,
++      ...(offer.compareAtAmountMinor
++        ? { compareAtAmountMinor: offer.compareAtAmountMinor }
+         : {}),
+-      currency: cheapest.currency,
+-      ...(cheapest.seller ? { seller: cheapest.seller } : {}),
+-      availability: stockOf(cheapest),
+-      deals: running(cheapest),
+-      count: offers.length,
++      currency: offer.currency,
++      condition: offer.condition ?? null,
++      ...(offer.seller ? { seller: offer.seller } : {}),
++      availability: stockOf(offer),
++      deals,
++      dealEndsAt: ending?.validUntil ?? null,
++      dealEndsEstimated: !!ending?.validUntilEstimated,
+       ...(series ? { history: series } : {}),
+     };
+-  });
+-  otherOffers.sort((a, b) => a.amountMinor - b.amountMinor);
++  };
++  const offers = [view(primary, true), ...rest.map((o) => view(o, false))];
+   return {
+     ...product,
+-    offers: [primary],
+-    availability: stockOf(primary),
+-    condition: primary.condition ?? null,
+-    deals: running(primary),
+-    otherOffers,
++    offers,
++    availability: offers[0].availability,
++    condition: offers[0].condition,
++    deals: offers[0].deals,
+   };
+ }
+-/** The product as the app receives it: stored data plus its normalized shown-offer facts (`productFacts`). */
++/** The product as the app receives it. */
+ export const ProductSchema = ProductFieldsSchema.extend({
+-  /** The primary offer only (one, as before): new when the page has one, else the condition `condition` names. */
+-  offers: z.array(OfferSchema).length(1),
++  /** Every offer, the primary first (see productFacts). */
++  offers: z.array(ProductOfferSchema).min(1),
++  /** @deprecated The primary offer's (offers[0]) stock; kept for older apps. */
+   availability: AvailabilitySchema.nullable(),
++  /** @deprecated The primary offer's condition; kept for older apps. */
+   condition: ConditionSchema.nullable(),
++  /** @deprecated The primary offer's running deals; kept for older apps. */
+   deals: z.array(PromotionSchema),
+-  /** The other conditions' offers, cheapest first. */
+-  otherOffers: z.array(OtherOfferSchema),
+ });
+ export type Product = z.infer<typeof ProductSchema>;
+ // Parsing strips internal evidence and audit metadata at the response boundary.
+diff --git a/apps/api/test/product-facts.test.ts b/apps/api/test/product-facts.test.ts
+index d29cdf6..5437e61 100644
+--- a/apps/api/test/product-facts.test.ts
++++ b/apps/api/test/product-facts.test.ts
+@@ -161,9 +161,15 @@ const many = (offers: object[]) =>
+     offers,
+   });
+ 
+-test("the primary offer is new when there is one; other conditions are offered cheapest-first, apart", () => {
+-  const history = new Map([
+-    ["used", [{ at: "2026-10-01T00:00:00.000Z", amountMinor: 20500 }]],
++test("every offer is its own: condition, seller, stock, deals and history; the primary (new) comes first", () => {
++  const byCondition = new Map([
++    ["new", [{ at: "2026-10-01T00:00:00.000Z", amountMinor: 30900 }]],
++  ]);
++  const byOffer = new Map([
++    [
++      "used\nSecond Life Audio",
++      [{ at: "2026-10-01T00:00:00.000Z", amountMinor: 20500 }],
++    ],
+   ]);
+   const product = ProductSchema.parse(
+     productFacts(
+@@ -172,44 +178,90 @@ test("the primary offer is new when there is one; other conditions are offered c
+         offer("new", 29900, {
+           compareAtAmountMinor: 32900,
+           seller: "Amazon.ca",
+-        }),
+-        offer("renewed", 21999, {
+-          seller: "Tech Renewed Canada",
+           availability: "InStock",
++          promotions: [
++            {
++              type: "deal",
++              text: "Lightning Deal",
++              validUntil: "2026-10-10T21:30:00.000Z",
++              validUntilEstimated: true,
++              kind: "lightning",
++              claimedPercent: 57,
++            },
++            {
++              type: "sale",
++              text: "Sale",
++              validUntil: "2026-10-13T06:59:00.000Z",
++            },
++          ],
+         }),
++        offer("renewed", 21999, { seller: "Tech Renewed Canada" }),
+         offer("used", 19850, { seller: "Second Life Audio" }),
+-        offer("new", 30499, { seller: "Gadget Hub CA" }),
+-        offer("used", 100, { currency: "USD" }),
++        offer(undefined, 30499, { seller: "Gadget Hub CA" }),
+       ]),
+-      { history },
++      {
++        now: Date.parse("2026-10-10T20:00:00Z"),
++        history: { byCondition, byOffer },
++      },
+     ),
+   );
+-  // Existing fields keep meaning "the new offer".
+-  assert.deepEqual(product.offers, [
+-    {
+-      amountMinor: 29900,
+-      compareAtAmountMinor: 32900,
+-      currency: "CAD",
+-      condition: "new",
+-      seller: "Amazon.ca",
+-    },
+-  ]);
+-  assert.equal(product.condition, "new");
+   assert.deepEqual(
+-    product.otherOffers.map((o) => [
+-      o.condition,
+-      o.amountMinor,
+-      o.seller,
+-      o.count,
+-      o.availability,
+-    ]),
++    product.offers.map((o) => [o.condition, o.amountMinor, o.seller]),
+     [
+-      ["used", 19850, "Second Life Audio", 2, null],
+-      ["renewed", 21999, "Tech Renewed Canada", 1, "in_stock"],
++      ["new", 29900, "Amazon.ca"],
++      [null, 30499, "Gadget Hub CA"],
++      ["renewed", 21999, "Tech Renewed Canada"],
++      ["used", 19850, "Second Life Audio"],
++      ["used", 23915, "Amazon Resale"],
+     ],
+   );
+-  assert.deepEqual(product.otherOffers[0].history, history.get("used"));
+-  assert.equal(product.otherOffers[1].history, undefined);
++  const [primary] = product.offers;
++  assert.equal(primary.availability, "in_stock");
++  assert.equal(primary.compareAtAmountMinor, 32900);
++  // The soonest running deal end, and that it was estimated from the page's countdown.
++  assert.equal(primary.dealEndsAt, "2026-10-10T21:30:00.000Z");
++  assert.equal(primary.dealEndsEstimated, true);
++  assert.equal(primary.deals[0].claimedPercent, 57);
++  assert.deepEqual(primary.history, byCondition.get("new"));
++  assert.deepEqual(
++    product.offers[3].history,
++    byOffer.get("used\nSecond Life Audio"),
++  );
++  assert.equal(product.offers[4].history, undefined);
++  assert.equal(product.offers[4].dealEndsAt, null);
++  // The deprecated product-level fields mirror the primary offer.
++  assert.equal(product.condition, "new");
++  assert.equal(product.availability, "in_stock");
++  assert.equal(product.deals.length, 2);
++});
++
++test("a deal past its end is not sent, and its end no longer counts", () => {
++  const product = productFacts(
++    many([
++      offer("new", 29900, {
++        promotions: [
++          {
++            type: "deal",
++            text: "Lightning Deal",
++            validUntil: "2026-10-10T21:30:00.000Z",
++            validUntilEstimated: true,
++          },
++          {
++            type: "sale",
++            text: "Sale",
++            validUntil: "2026-10-13T06:59:00.000Z",
++          },
++        ],
++      }),
++    ]),
++    { now: Date.parse("2026-10-10T22:00:00Z") },
++  );
++  assert.deepEqual(
++    product.offers[0].deals.map((d) => d.text),
++    ["Sale"],
++  );
++  assert.equal(product.offers[0].dealEndsAt, "2026-10-13T06:59:00.000Z");
++  assert.equal(product.offers[0].dealEndsEstimated, false);
+ });
+ 
+ test("with no new offer the primary is the first offer and names its condition; unstated is read as new", () => {
+@@ -217,62 +269,69 @@ test("with no new offer the primary is the first offer and names its condition;
+     many([offer("used", 9000), offer("renewed", 12000)]),
+   );
+   assert.equal(used.condition, "used");
+-  assert.equal(used.offers[0].amountMinor, 9000);
+   assert.deepEqual(
+-    used.otherOffers.map((o) => o.condition),
+-    ["renewed"],
++    used.offers.map((o) => o.condition),
++    ["used", "renewed"],
+   );
+   const unstated = productFacts(
+     many([offer("renewed", 12000), offer(undefined, 15000)]),
+   );
+   assert.equal(unstated.offers[0].amountMinor, 15000);
+   assert.equal(unstated.condition, null);
+-  assert.deepEqual(
+-    unstated.otherOffers.map((o) => o.condition),
+-    ["renewed"],
+-  );
+ });
+ 
+-test("history is answered per condition: the primary's own series, never mixed with used prices", async () => {
++test("history per offer: the primary's featured series and each other offer's own, never mixed", async () => {
+   const url = "https://www.amazon.ca/dp/B0CHX1W1XY";
++  const at = (day: number) => new Date(`2026-10-0${day}T00:00:00Z`);
++  const row = (
++    day: number,
++    obs: number | null,
++    index: number | null,
++    condition: string | null,
++    seller: string | null,
++    amount: bigint,
++  ) => ({
++    url,
++    at: at(day),
++    amount,
++    condition,
++    seller,
++    observation: obs === null ? null : BigInt(obs),
++    offer_index: index,
++  });
+   const db = {
+     $queryRaw: async (query: { sql: string }) =>
+       query.sql.includes("external_price_points")
+         ? [
+-            {
+-              url,
+-              at: new Date("2026-10-01T00:00:00Z"),
+-              amount: 30900n,
+-              condition: "new",
+-            },
+-            {
+-              url,
+-              at: new Date("2026-10-01T00:00:00Z"),
+-              amount: 21000n,
+-              condition: "used",
+-            },
+-            {
+-              url,
+-              at: new Date("2026-10-02T00:00:00Z"),
+-              amount: 29900n,
+-              condition: null,
+-            },
++            row(1, null, null, "new", null, 31900n),
++            // Capture 2: the featured new offer first; another seller's cheaper new offer is not the featured price.
++            row(2, 2, 0, "new", "Amazon.ca", 29900n),
++            row(2, 2, 1, "used", "Amazon Resale", 23915n),
++            row(2, 2, 2, "used", "Second Life Audio", 19850n),
++            row(2, 2, 3, null, "Gadget Hub CA", 28000n),
++            row(3, 3, 0, "new", "Amazon.ca", 28900n),
++            row(3, 3, 1, "used", "Second Life Audio", 18900n),
+           ]
+         : [
+             {
+               url,
+-              data: many([offer("new", 29900), offer("used", 19850)]),
+-              observed_at: new Date("2026-10-02T00:00:00Z"),
++              data: many([
++                offer("new", 28900, { seller: "Amazon.ca" }),
++                offer("used", 18900, { seller: "Second Life Audio" }),
++                offer("used", 23915, { seller: "Amazon Resale" }),
++              ]),
++              observed_at: at(3),
+             },
+           ],
+   } as unknown as PrismaService;
+   const found = (await new ProductLookupService(db).describe([url])).get(url)!;
++  const amounts = (points?: { amountMinor: number | null }[]) =>
++    points?.map((p) => p.amountMinor);
++  assert.deepEqual(amounts(found.history), [31900, 29900, 28900]);
+   assert.deepEqual(
+-    found.history.map((p) => p.amountMinor),
+-    [30900, 29900],
+-  );
+-  assert.deepEqual(
+-    found.product?.otherOffers[0].history?.map((p) => p.amountMinor),
+-    [21000],
++    amounts(found.product?.offers[0].history),
++    [31900, 29900, 28900],
+   );
++  assert.deepEqual(amounts(found.product?.offers[1].history), [19850, 18900]);
++  assert.deepEqual(amounts(found.product?.offers[2].history), [23915]);
+ });
+diff --git a/apps/mobile/src/cart/Product.tsx b/apps/mobile/src/cart/Product.tsx
+index 0d6be2e..d4f46d0 100644
+--- a/apps/mobile/src/cart/Product.tsx
++++ b/apps/mobile/src/cart/Product.tsx
+@@ -3,7 +3,8 @@ import type { MobileProduct } from "../products-api";
+ import { money } from "../money";
+ import { percentOff } from "../product/product-store";
+ import { priceTrend } from "./price-trend";
+-import { productTags } from "../product/product-facts";
++import { countdownTick, dealEnd, productTags } from "../product/product-facts";
++import { useNow } from "../product/use-now";
+ 
+ /** The card's image box height: its width times the image's ratio (see useMeasuredItems), else the fixed shape. */
+ export const productImageHeight = (
+@@ -38,6 +39,9 @@ export function Product({
+   selected?: boolean;
+ }) {
+   const offer = product.offers[0];
++  // A deal with an end counts down on the card: each minute, each second in its last hour.
++  const ending = offer ? dealEnd(product, offer, Date.now()) : undefined;
++  const now = useNow(countdownTick(ending?.at, Date.now()));
+   const percent = offer
+     ? percentOff(offer.amountMinor, offer.compareAtAmountMinor)
+     : undefined;
+@@ -66,7 +70,7 @@ export function Product({
+         trend: offer
+           ? priceTrend(product.history ?? [], offer.amountMinor)
+           : undefined,
+-        productTags: productTags(product),
++        productTags: productTags(product, now),
+       }}
+       selected={selected}
+       onPress={onPress}
+diff --git a/apps/mobile/src/product/DealCountdown.tsx b/apps/mobile/src/product/DealCountdown.tsx
+new file mode 100644
+index 0000000..9cebc4c
+--- /dev/null
++++ b/apps/mobile/src/product/DealCountdown.tsx
+@@ -0,0 +1,47 @@
++import { StyleSheet } from "react-native";
++import { Copy, colors } from "@morydeals/ui";
++import { capturedAgo, countdownText, countdownTick } from "./product-facts";
++import { useNow } from "./use-now";
++
++/**
++ * A deal's live countdown ("Ends in 3h 12m", each second in its last hour); nothing once it has ended. An end
++ * estimated from the store's own countdown says so, and from which capture (`observedAt`) it counts.
++ */
++export function DealCountdown({
++  endsAt,
++  estimated,
++  observedAt,
++  compact = false,
++}: {
++  endsAt: number;
++  estimated: boolean;
++  observedAt?: string;
++  /** A row's short form, without the capture note. */
++  compact?: boolean;
++}) {
++  const now = useNow(countdownTick(endsAt, Date.now()));
++  const text = countdownText(endsAt, now, { estimated });
++  if (!text) return null;
++  const note =
++    estimated && !compact
++      ? ["estimated from the store's countdown", capturedAgo(observedAt, now)]
++          .filter(Boolean)
++          .join(", ")
++      : undefined;
++  return (
++    <Copy
++      weight="bold"
++      style={compact ? s.compact : s.text}
++      accessibilityLabel={`${text.replace("~", "about ")}${note ? `, ${note}` : ""}`}
++    >
++      {text}
++      {note ? <Copy style={s.note}>{` · ${note}`}</Copy> : null}
++    </Copy>
++  );
++}
++
++const s = StyleSheet.create({
++  text: { fontSize: 13, lineHeight: 18, color: colors.accentInk },
++  compact: { fontSize: 12, lineHeight: 16, color: colors.accentInk },
++  note: { fontSize: 12, lineHeight: 18, color: colors.muted },
++});
+diff --git a/apps/mobile/src/product/OfferList.tsx b/apps/mobile/src/product/OfferList.tsx
+new file mode 100644
+index 0000000..481a01f
+--- /dev/null
++++ b/apps/mobile/src/product/OfferList.tsx
+@@ -0,0 +1,108 @@
++import { useState } from "react";
++import { StyleSheet, View } from "react-native";
++import { Button, Copy, colors } from "@morydeals/ui";
++import type { MobileProduct } from "../products-api";
++import { money } from "../money";
++import { DealCountdown } from "./DealCountdown";
++import { OFFERS_SHOWN, offerRows, shownRows } from "./product-facts";
++
++/**
++ * Every offer for the product, one row each: condition, seller and stock; price and former price; its deal and
++ * countdown. The primary offer first, then by condition and price; collapsed after OFFERS_SHOWN.
++ */
++export function OfferList({ product }: { product: MobileProduct }) {
++  const [expanded, setExpanded] = useState(false);
++  const rows = offerRows(product, money, Date.now());
++  if (rows.length < 2) return null;
++  return (
++    <View style={s.list}>
++      <Copy weight="extra" style={s.heading}>
++        {`${rows.length} offers`}
++      </Copy>
++      {shownRows(rows, expanded).map((row) => (
++        <View key={row.key} style={s.row}>
++          <View style={s.top}>
++            <View style={s.who}>
++              {row.condition ? (
++                <View style={s.pill}>
++                  <Copy weight="extra" style={s.pillText}>
++                    {row.condition}
++                  </Copy>
++                </View>
++              ) : null}
++              <Copy weight="bold" style={s.seller} numberOfLines={1}>
++                {row.seller ?? "Seller not stated"}
++              </Copy>
++            </View>
++            <View style={s.prices}>
++              {row.was ? <Copy style={s.was}>{row.was}</Copy> : null}
++              <Copy weight="extra" style={s.price}>
++                {row.price}
++              </Copy>
++            </View>
++          </View>
++          {row.stock ? (
++            <Copy style={[s.stock, row.outOfStock && { color: colors.danger }]}>
++              {row.stock}
++            </Copy>
++          ) : null}
++          {row.deal || row.endsAt ? (
++            <View style={s.dealRow}>
++              {row.deal ? (
++                <Copy weight="bold" style={s.deal}>
++                  {row.deal}
++                </Copy>
++              ) : null}
++              {row.endsAt ? (
++                <DealCountdown
++                  endsAt={row.endsAt}
++                  estimated={row.estimated}
++                  compact
++                />
++              ) : null}
++            </View>
++          ) : null}
++        </View>
++      ))}
++      {rows.length > OFFERS_SHOWN ? (
++        <Button secondary onPress={() => setExpanded((open) => !open)}>
++          {expanded ? "Show fewer" : `Show all ${rows.length} offers`}
++        </Button>
++      ) : null}
++    </View>
++  );
++}
++
++const s = StyleSheet.create({
++  list: { gap: 8 },
++  heading: { fontSize: 17, lineHeight: 24 },
++  row: {
++    gap: 4,
++    padding: 12,
++    borderRadius: 16,
++    backgroundColor: colors.surface,
++    borderWidth: 1,
++    borderColor: colors.line,
++  },
++  top: { flexDirection: "row", alignItems: "center", gap: 8 },
++  who: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
++  pill: {
++    paddingHorizontal: 8,
++    paddingVertical: 2,
++    borderRadius: 999,
++    backgroundColor: colors.surfaceSunken,
++  },
++  pillText: { fontSize: 12, lineHeight: 16, color: colors.ink },
++  seller: { flexShrink: 1, fontSize: 14, lineHeight: 19 },
++  prices: { flexDirection: "row", alignItems: "baseline", gap: 6 },
++  price: { fontSize: 16, lineHeight: 22, color: colors.accentInk },
++  was: {
++    fontSize: 13,
++    lineHeight: 18,
++    color: colors.muted,
++    textDecorationLine: "line-through",
++  },
++  stock: { fontSize: 13, lineHeight: 18, color: colors.success },
++  dealRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
++  deal: { fontSize: 12, lineHeight: 16, color: colors.accentInk },
++});
+diff --git a/apps/mobile/src/product/ProductDetail.tsx b/apps/mobile/src/product/ProductDetail.tsx
+index 58cdd6f..63d9da4 100644
+--- a/apps/mobile/src/product/ProductDetail.tsx
++++ b/apps/mobile/src/product/ProductDetail.tsx
+@@ -25,10 +25,16 @@ import {
+   availabilityLabels,
+   availabilityOf,
+   conditionLabel,
++  countdownTick,
++  dealEnd,
+   dealLine,
+-  otherOffersLine,
++  offerCondition,
++  offerDeals,
+   ratingText,
+ } from "./product-facts";
++import { DealCountdown } from "./DealCountdown";
++import { useNow } from "./use-now";
++import { OfferList } from "./OfferList";
+ 
+ const dayLabel = new Intl.DateTimeFormat("en-CA", {
+   month: "short",
+@@ -80,9 +86,14 @@ export function ProductDetail({
+   const percent = percentOff(offer.amountMinor, offer.compareAtAmountMinor);
+   const format = (amount: number) => money(amount, offer.currency);
+   const stock = availabilityOf(product);
+-  const condition = conditionLabel(product.condition);
++  const condition = conditionLabel(offerCondition(product, offer));
+   const stars = ratingText(product.rating);
+-  const also = otherOffersLine(product, money);
++  // Re-rendered as the soonest deal ends, so an ended deal leaves the page with its countdown.
++  const now = useNow(
++    countdownTick(dealEnd(product, offer, Date.now())?.at, Date.now()),
++  );
++  const deals = offerDeals(product, offer, now);
++  const ending = dealEnd(product, offer, now);
+   const facts = [
+     stock ? availabilityLabels[stock] : undefined,
+     offer.seller ? `Sold by ${offer.seller}` : undefined,
+@@ -173,18 +184,21 @@ export function ProductDetail({
+             {facts.join(" · ")}
+           </Copy>
+         ) : null}
+-        {also ? (
+-          <Copy weight="bold" style={s.also}>
+-            {also}
+-          </Copy>
+-        ) : null}
+-        {(product.deals ?? []).map((deal, i) => (
++        {deals.map((deal, i) => (
+           <View key={`${deal.type}-${i}`} style={s.deal}>
+             <Copy weight="bold" style={s.dealText}>
+               {dealLine(deal, (day) => dayLabel.format(new Date(day)))}
+             </Copy>
+           </View>
+         ))}
++        {ending ? (
++          <DealCountdown
++            endsAt={ending.at}
++            estimated={ending.estimated}
++            observedAt={product.observedAt}
++          />
++        ) : null}
++        <OfferList product={product} />
+         <Copy weight="extra" style={s.section}>
+           Price history
+         </Copy>
+@@ -282,7 +296,6 @@ const s = StyleSheet.create({
+     backgroundColor: colors.surfaceSunken,
+   },
+   conditionText: { fontSize: 13, lineHeight: 18, color: colors.ink },
+-  also: { fontSize: 13, lineHeight: 18, color: colors.ink },
+   section: { fontSize: 18, lineHeight: 24, marginTop: 6 },
+   bar: {
+     position: "absolute",
+diff --git a/apps/mobile/src/product/product-facts.ts b/apps/mobile/src/product/product-facts.ts
+index 6e69cec..ca90c9c 100644
+--- a/apps/mobile/src/product/product-facts.ts
++++ b/apps/mobile/src/product/product-facts.ts
+@@ -1,5 +1,6 @@
+ import type { ProductTag } from "@morydeals/ui";
+ import type {
++  MobileOffer,
+   MobileProduct,
+   ProductAvailability,
+   ProductCondition,
+@@ -15,12 +16,74 @@ const LEGACY: Record<string, ProductAvailability> = {
+   LimitedAvailability: "limited",
+   Discontinued: "discontinued",
+ };
+-/** The shown offer's stock, or null when the store does not say. */
++const STOCK = new Set<string>([
++  "in_stock",
++  "out_of_stock",
++  "preorder",
++  "backorder",
++  "limited",
++  "discontinued",
++]);
++/** An offer's stock, or null when the store does not say (older caches hold a schema.org name). */
++export function offerAvailability(
++  offer: MobileOffer | undefined,
++): ProductAvailability | null | undefined {
++  const value = offer?.availability;
++  if (value === null) return null;
++  if (value === undefined) return undefined;
++  return STOCK.has(value)
++    ? (value as ProductAvailability)
++    : (LEGACY[value] ?? null);
++}
++/** The primary offer's stock, or null when the store does not say. */
+ export function availabilityOf(
+   product: MobileProduct,
+ ): ProductAvailability | null {
++  const offer = product.offers[0];
++  // An older API sent the stock on the product and a schema.org name on the offer.
++  if (offer && STOCK.has(String(offer.availability)))
++    return offer.availability as ProductAvailability;
+   if (product.availability !== undefined) return product.availability;
+-  return LEGACY[product.offers[0]?.availability ?? ""] ?? null;
++  return offerAvailability(offer) ?? null;
++}
++/** The offer's stated condition (the primary falls back to the product-level field of older APIs). */
++export function offerCondition(
++  product: MobileProduct,
++  offer: MobileOffer,
++): ProductCondition | null {
++  if (offer.condition !== undefined) return offer.condition;
++  return offer === product.offers[0] ? (product.condition ?? null) : null;
++}
++/** An offer's deals still running at `now` (a deal past its end is never shown as active). */
++export function offerDeals(
++  product: MobileProduct,
++  offer: MobileOffer,
++  now: number,
++): ProductDeal[] {
++  const deals =
++    offer.deals ?? (offer === product.offers[0] ? product.deals : undefined);
++  return (deals ?? []).filter(
++    (deal) => !deal.validUntil || Date.parse(deal.validUntil) > now,
++  );
++}
++/** The soonest end among an offer's running deals, with whether it was estimated from the store's countdown. */
++export function dealEnd(
++  product: MobileProduct,
++  offer: MobileOffer,
++  now: number,
++): { at: number; estimated: boolean } | undefined {
++  const ends = offerDeals(product, offer, now)
++    .filter((deal) => deal.validUntil)
++    .map((deal) => ({
++      at: Date.parse(deal.validUntil!),
++      estimated: !!deal.validUntilEstimated,
++    }));
++  if (offer.dealEndsAt && Date.parse(offer.dealEndsAt) > now)
++    ends.push({
++      at: Date.parse(offer.dealEndsAt),
++      estimated: !!offer.dealEndsEstimated,
++    });
++  return ends.sort((a, b) => a.at - b.at)[0];
+ }
+ export const availabilityLabels: Record<ProductAvailability, string> = {
+   in_stock: "In stock",
+@@ -76,27 +139,85 @@ const DEAL_ORDER: ProductDeal["type"][] = [
+  * A card's tags, at most two: a stock problem, a non-new condition, then the leading deal. Nothing is shown when
+  * the product is in stock, new and has no deal, or when the store says nothing.
+  */
+-export function productTags(product: MobileProduct): ProductTag[] {
++export function productTags(
++  product: MobileProduct,
++  now = Date.now(),
++): ProductTag[] {
+   const tags: ProductTag[] = [];
+   const stock = availabilityOf(product);
+   if (stock && stock !== "in_stock" && stock !== "limited")
+     tags.push({ label: availabilityLabels[stock] });
+-  const condition = conditionLabel(product.condition);
+-  if (condition) tags.push({ label: condition });
+   const offer = product.offers[0];
++  const condition = offer
++    ? conditionLabel(offerCondition(product, offer))
++    : undefined;
++  if (condition) tags.push({ label: condition });
+   // A plain "Sale" beside a struck-through price only repeats the card's "% off" badge.
+   const discounted =
+     !!offer?.compareAtAmountMinor &&
+     offer.compareAtAmountMinor > offer.amountMinor;
+-  const deal = [...(product.deals ?? [])]
+-    .filter((d) => !(discounted && d.type === "sale" && /^sale$/i.test(d.text)))
+-    .sort((a, b) => DEAL_ORDER.indexOf(a.type) - DEAL_ORDER.indexOf(b.type))
+-    .map(dealTag)
+-    .find(Boolean);
++  const deals = offer ? offerDeals(product, offer, now) : [];
++  // A deal with an end shows its countdown instead of its name: "Ends in 3h 12m".
++  const ending = offer ? dealEnd(product, offer, now) : undefined;
++  const deal = ending
++    ? countdownText(ending.at, now, { estimated: ending.estimated })
++    : deals
++        .filter(
++          (d) => !(discounted && d.type === "sale" && /^sale$/i.test(d.text)),
++        )
++        .sort((a, b) => DEAL_ORDER.indexOf(a.type) - DEAL_ORDER.indexOf(b.type))
++        .map(dealTag)
++        .find(Boolean);
+   if (deal) tags.push({ label: deal, tone: "accent" });
+   return tags.slice(0, 2);
+ }
+ 
++const HOUR = 3_600_000;
++const pad = (n: number) => String(n).padStart(2, "0");
++/**
++ * "Ends in 2d 4h", "Ends in 3h 12m", or in the last hour "Ends in 12m 05s"; nothing once it has ended. An end
++ * estimated from the store's countdown reads "Ends in ~3h 12m".
++ */
++export function countdownText(
++  endsAt: number | string,
++  now: number,
++  { estimated = false }: { estimated?: boolean } = {},
++): string | undefined {
++  const left = (typeof endsAt === "string" ? Date.parse(endsAt) : endsAt) - now;
++  if (!(left > 0)) return undefined;
++  const seconds = Math.floor(left / 1000);
++  const d = Math.floor(seconds / 86_400);
++  const h = Math.floor((seconds % 86_400) / 3600);
++  const m = Math.floor((seconds % 3600) / 60);
++  const time =
++    d > 0
++      ? `${d}d ${h}h`
++      : h > 0
++        ? `${h}h ${m}m`
++        : `${m}m ${pad(seconds % 60)}s`;
++  return `Ends in ${estimated ? "~" : ""}${time}`;
++}
++/** How often a countdown must re-render: each second in its last hour, else each minute; never once ended. */
++export function countdownTick(
++  endsAt: number | undefined,
++  now: number,
++): number | null {
++  if (endsAt === undefined || endsAt <= now) return null;
++  return endsAt - now <= HOUR ? 1000 : 60_000;
++}
++/** "captured 2h ago" for the capture an estimated end counts from. */
++export function capturedAgo(observedAt: string | undefined, now: number) {
++  const at = observedAt ? Date.parse(observedAt) : NaN;
++  if (Number.isNaN(at)) return undefined;
++  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
++  if (minutes < 1) return "captured just now";
++  if (minutes < 60) return `captured ${minutes}m ago`;
++  const hours = Math.floor(minutes / 60);
++  return hours < 24
++    ? `captured ${hours}h ago`
++    : `captured ${Math.floor(hours / 24)}d ago`;
++}
++
+ const count = new Intl.NumberFormat("en-CA");
+ /** "4.6 ★ (1,284)" for a 5-point rating; other scales say theirs ("8.4/10"). */
+ export function ratingText(
+@@ -115,34 +236,91 @@ export function dealLine(
+   return [
+     deal.text,
+     deal.code ? `Code ${deal.code}` : undefined,
+-    deal.validUntil ? `Ends ${formatDay(deal.validUntil)}` : undefined,
++    deal.claimedPercent !== undefined
++      ? `${deal.claimedPercent}% claimed`
++      : undefined,
++    // A stated end is dated; an estimated one is only shown as a countdown (its date would claim precision).
++    deal.validUntil && !deal.validUntilEstimated
++      ? `Ends ${formatDay(deal.validUntil)}`
++      : undefined,
+   ]
+     .filter(Boolean)
+     .join(" · ");
+ }
+ 
+-const CONDITION_WORDS: Record<ProductCondition, string> = {
++/** Every condition's word, new included, for listing offers side by side. */
++export const conditionWords: Record<ProductCondition, string> = {
+   new: "New",
+   ...conditionLabels,
+ };
+-/**
+- * "Also: Used from $239.15 · Renewed from $219.99", the other conditions' cheapest prices the store showed, or
+- * nothing. Out-of-stock offers are left out; nothing is shown that the store did not state.
+- */
+-export function otherOffersLine(
++const CONDITION_ORDER: (ProductCondition | null)[] = [
++  "new",
++  null,
++  "open_box",
++  "renewed",
++  "used",
++  "damaged",
++];
++/** The product's offers to list: the primary first, then by condition (new, open box, renewed, used), then price. */
++export function orderedOffers(product: MobileProduct): MobileOffer[] {
++  const [primary, ...rest] = product.offers;
++  if (!primary) return [];
++  return [
++    primary,
++    ...[...rest].sort(
++      (a, b) =>
++        CONDITION_ORDER.indexOf(offerCondition(product, a)) -
++          CONDITION_ORDER.indexOf(offerCondition(product, b)) ||
++        a.amountMinor - b.amountMinor,
++    ),
++  ];
++}
++/** How many offers show before "Show all". */
++export const OFFERS_SHOWN = 3;
++/** One offer's row on the product page: its condition, seller and stock, its price and former price, its deal. */
++export type OfferRow = {
++  key: string;
++  condition?: string;
++  seller?: string;
++  stock?: string;
++  outOfStock: boolean;
++  price: string;
++  was?: string;
++  deal?: string;
++  endsAt?: number;
++  estimated: boolean;
++};
++export function offerRows(
+   product: MobileProduct,
+   format: (amountMinor: number, currency: string) => string,
+-): string | undefined {
+-  const shown = (product.otherOffers ?? []).filter(
+-    (offer) =>
+-      offer.availability !== "out_of_stock" &&
+-      offer.availability !== "discontinued",
+-  );
+-  if (!shown.length) return undefined;
+-  return `Also: ${shown
+-    .map(
+-      (offer) =>
+-        `${CONDITION_WORDS[offer.condition]} from ${format(offer.amountMinor, offer.currency)}`,
+-    )
+-    .join(" · ")}`;
++  now: number,
++): OfferRow[] {
++  return orderedOffers(product).map((offer, i) => {
++    const condition = offerCondition(product, offer);
++    const stock =
++      i === 0 ? availabilityOf(product) : (offerAvailability(offer) ?? null);
++    const deals = offerDeals(product, offer, now);
++    const ending = dealEnd(product, offer, now);
++    const lead = [...deals].sort(
++      (a, b) => DEAL_ORDER.indexOf(a.type) - DEAL_ORDER.indexOf(b.type),
++    )[0];
++    return {
++      key: `${i}-${condition ?? ""}-${offer.seller ?? ""}-${offer.amountMinor}`,
++      ...(condition ? { condition: conditionWords[condition] } : {}),
++      ...(offer.seller ? { seller: offer.seller } : {}),
++      ...(stock ? { stock: availabilityLabels[stock] } : {}),
++      outOfStock: stock === "out_of_stock" || stock === "discontinued",
++      price: format(offer.amountMinor, offer.currency),
++      ...(offer.compareAtAmountMinor &&
++      offer.compareAtAmountMinor > offer.amountMinor
++        ? { was: format(offer.compareAtAmountMinor, offer.currency) }
++        : {}),
++      ...(lead ? { deal: lead.text } : {}),
++      ...(ending ? { endsAt: ending.at } : {}),
++      estimated: !!ending?.estimated,
++    };
++  });
+ }
++/** The rows shown: the first OFFERS_SHOWN until expanded. */
++export const shownRows = (rows: OfferRow[], expanded: boolean) =>
++  expanded ? rows : rows.slice(0, OFFERS_SHOWN);
+diff --git a/apps/mobile/src/product/use-now.ts b/apps/mobile/src/product/use-now.ts
+new file mode 100644
+index 0000000..910c4c1
+--- /dev/null
++++ b/apps/mobile/src/product/use-now.ts
+@@ -0,0 +1,26 @@
++import { useEffect, useState } from "react";
++
++/**
++ * The current time, re-rendering every `everyMs` (aligned to the clock, so countdowns turn together); `null`
++ * stops ticking (nothing is counting down). Used for deal countdowns on cards and the product page.
++ */
++export function useNow(everyMs: number | null): number {
++  const [now, setNow] = useState(() => Date.now());
++  useEffect(() => {
++    if (everyMs === null) return;
++    let timer: ReturnType<typeof setTimeout>;
++    const schedule = () => {
++      timer = setTimeout(
++        () => {
++          setNow(Date.now());
++          schedule();
++        },
++        everyMs - (Date.now() % everyMs) + 5,
++      );
++    };
++    setNow(Date.now());
++    schedule();
++    return () => clearTimeout(timer);
++  }, [everyMs]);
++  return now;
++}
+diff --git a/apps/mobile/src/products-api.ts b/apps/mobile/src/products-api.ts
+index e9c48d7..e5b2719 100644
+--- a/apps/mobile/src/products-api.ts
++++ b/apps/mobile/src/products-api.ts
+@@ -7,13 +7,8 @@ export type MobileProduct = {
+   title: string;
+   images: string[];
+   brand?: string;
+-  offers: {
+-    amountMinor: number;
+-    compareAtAmountMinor?: number;
+-    currency: string;
+-    availability?: string;
+-    seller?: string;
+-  }[];
++  /** Every offer for this product (one price each), the primary first: new when the store has one. */
++  offers: MobileOffer[];
+   /** The selected variant the store names, e.g. "Black · 256GB". */
+   variant?: {
+     id?: string;
+@@ -22,17 +17,15 @@ export type MobileProduct = {
+   };
+   /** The store's published rating, e.g. 4.6 of 5 from 1,284 reviews. */
+   rating?: { value: number; scale: number; count?: number };
+-  /** The shown offer's stock as the store states it; null or absent when it does not say. */
++  /** @deprecated The primary offer's stock; read `offers[0]` (kept for responses and caches from older APIs). */
+   availability?: ProductAvailability | null;
+-  /** The item's stated condition; null or absent when unstated (most stores sell new without saying so). */
++  /** @deprecated The primary offer's condition; read `offers[0]`. */
+   condition?: ProductCondition | null;
+-  /** Deals the store shows beside the price that are still running. */
++  /** @deprecated The primary offer's running deals; read `offers[0]`. */
+   deals?: ProductDeal[];
+-  /** The cheapest offer of each other condition (new is the primary when the store has one). */
+-  otherOffers?: OtherOffer[];
+-  /** When the product was last captured. */
++  /** When the product was last captured: the capture time of its offers (deal countdowns count from it). */
+   observedAt?: string;
+-  /** Up to 90 days of prices from the server cart (Keepa Buy Box and our captures); null is a gap. */
++  /** Up to 90 days of the primary offer's prices (Keepa Buy Box and our captures); null is a gap. */
+   history?: { at: string; amountMinor: number | null }[];
+ };
+ export type ProductAvailability =
+@@ -49,17 +42,27 @@ export type ProductDeal = {
+   text: string;
+   code?: string;
+   effectiveMinor?: number;
++  /** When the deal ends (UTC). */
+   validUntil?: string;
++  /** The end was computed from the store's countdown plus the capture time, not stated by the store. */
++  validUntilEstimated?: boolean;
++  kind?: "lightning" | "deal_of_the_day" | "limited_time";
++  /** A Lightning Deal's share claimed, as the store states it. */
++  claimedPercent?: number;
+ };
+-export type OtherOffer = {
+-  condition: ProductCondition;
++/** One offer: one price with its own condition, seller, stock, deals, deal end and history. */
++export type MobileOffer = {
+   amountMinor: number;
+   compareAtAmountMinor?: number;
+   currency: string;
++  /** The app's stock value; products cached from older APIs hold a schema.org name here. */
++  availability?: ProductAvailability | string | null;
++  condition?: ProductCondition | null;
+   seller?: string;
+-  availability?: ProductAvailability | null;
+   deals?: ProductDeal[];
+-  count: number;
++  /** When the soonest-ending running deal ends; null or absent when no deal shows an end. */
++  dealEndsAt?: string | null;
++  dealEndsEstimated?: boolean;
+   history?: { at: string; amountMinor: number | null }[];
+ };
+ type CaptureStatus =
+@@ -79,7 +82,7 @@ export const isMobileProduct = (p: unknown): p is MobileProduct => {
+     Array.isArray(product.images) &&
+     product.images.every((i) => typeof i === "string") &&
+     Array.isArray(product.offers) &&
+-    product.offers.length === 1 &&
++    product.offers.length >= 1 &&
+     product.offers.every(
+       (o) =>
+         typeof o?.amountMinor === "number" &&
+diff --git a/apps/mobile/test/product-facts.test.ts b/apps/mobile/test/product-facts.test.ts
+index eef0df0..98f3271 100644
+--- a/apps/mobile/test/product-facts.test.ts
++++ b/apps/mobile/test/product-facts.test.ts
+@@ -3,10 +3,17 @@ import assert from "node:assert/strict";
+ import type { MobileProduct } from "../src/products-api";
+ import {
+   availabilityOf,
++  OFFERS_SHOWN,
++  capturedAgo,
++  countdownText,
++  countdownTick,
++  dealEnd,
+   dealLine,
+-  otherOffersLine,
++  offerCondition,
++  offerRows,
+   productTags,
+   ratingText,
++  shownRows,
+ } from "../src/product/product-facts";
+ 
+ const product = (
+@@ -106,44 +113,174 @@ test("a deal line keeps the store's words, its code and its end", () => {
+   );
+ });
+ 
+-test("other conditions read as 'Also: Used from $X · Renewed from $Y', leaving out unavailable ones", () => {
+-  const format = (amount: number) => `$${(amount / 100).toFixed(2)}`;
+-  assert.equal(otherOffersLine(product(), format), undefined);
++const NOW = Date.parse("2026-10-10T20:00:00Z");
++const fmt = (amount: number) => `$${(amount / 100).toFixed(2)}`;
++
++test("availability and condition are the offer's own; the product-level fields only back older APIs", () => {
+   assert.equal(
+-    otherOffersLine(
++    availabilityOf(
+       product({
+-        otherOffers: [
+-          { condition: "used", amountMinor: 19850, currency: "CAD", count: 2 },
+-          {
+-            condition: "renewed",
+-            amountMinor: 21999,
+-            currency: "CAD",
+-            count: 1,
+-          },
+-          {
+-            condition: "open_box",
+-            amountMinor: 25000,
+-            currency: "CAD",
+-            count: 1,
+-            availability: "out_of_stock",
+-          },
++        availability: "in_stock",
++        offers: [
++          { amountMinor: 1, currency: "CAD", availability: "out_of_stock" },
+         ],
+       }),
+-      format,
+     ),
+-    "Also: Used from $198.50 · Renewed from $219.99",
++    "out_of_stock",
+   );
+-  // A used primary offers the new price beside it.
++  const p = product({
++    condition: "used",
++    offers: [
++      { amountMinor: 1, currency: "CAD" },
++      { amountMinor: 2, currency: "CAD", condition: "renewed" },
++    ],
++  });
++  assert.equal(offerCondition(p, p.offers[0]), "used");
++  assert.equal(offerCondition(p, p.offers[1]), "renewed");
++});
++
++test("countdowns: days and hours, hours and minutes, then seconds in the last hour; nothing once ended", () => {
++  const at = (ms: number) => NOW + ms;
+   assert.equal(
+-    otherOffersLine(
+-      product({
++    countdownText(at(2 * 86_400_000 + 4 * 3_600_000 + 5), NOW),
++    "Ends in 2d 4h",
++  );
++  assert.equal(
++    countdownText(at((3 * 60 + 12) * 60_000 + 30_000), NOW),
++    "Ends in 3h 12m",
++  );
++  assert.equal(countdownText(at(12 * 60_000 + 5_000), NOW), "Ends in 12m 05s");
++  assert.equal(
++    countdownText(at(3 * 3_600_000), NOW, { estimated: true }),
++    "Ends in ~3h 0m",
++  );
++  assert.equal(countdownText(at(0), NOW), undefined);
++  assert.equal(countdownText(at(-1000), NOW), undefined);
++  assert.equal(
++    countdownText("2026-10-10T21:30:00.000Z", NOW),
++    "Ends in 1h 30m",
++  );
++  // Each minute, each second in the last hour, and no ticking once ended or with no end.
++  assert.equal(countdownTick(at(2 * 3_600_000), NOW), 60_000);
++  assert.equal(countdownTick(at(59 * 60_000), NOW), 1000);
++  assert.equal(countdownTick(at(-1), NOW), null);
++  assert.equal(countdownTick(undefined, NOW), null);
++  assert.equal(capturedAgo("2026-10-10T18:00:00Z", NOW), "captured 2h ago");
++  assert.equal(capturedAgo("2026-10-10T19:55:00Z", NOW), "captured 5m ago");
++  assert.equal(capturedAgo(undefined, NOW), undefined);
++});
++
++const lightning = {
++  type: "deal" as const,
++  text: "Lightning Deal",
++  validUntil: "2026-10-10T21:30:00.000Z",
++  validUntilEstimated: true,
++  claimedPercent: 57,
++};
++
++test("a card's deal with an end shows its countdown, and an ended deal disappears", () => {
++  const p = product({
++    offers: [
++      {
++        amountMinor: 100,
++        currency: "CAD",
++        deals: [lightning],
++        dealEndsAt: lightning.validUntil,
++        dealEndsEstimated: true,
++      },
++    ],
++  });
++  assert.deepEqual(productTags(p, NOW), [
++    { label: "Ends in ~1h 30m", tone: "accent" },
++  ]);
++  assert.deepEqual(productTags(p, Date.parse("2026-10-10T21:30:01Z")), []);
++  assert.deepEqual(dealEnd(p, p.offers[0], NOW), {
++    at: Date.parse(lightning.validUntil),
++    estimated: true,
++  });
++  assert.equal(
++    dealLine(lightning, () => "Oct 10"),
++    "Lightning Deal · 57% claimed",
++  );
++});
++
++test("the offers list: primary first, then by condition and price, each with its own facts", () => {
++  const p = product({
++    offers: [
++      {
++        amountMinor: 28900,
++        compareAtAmountMinor: 32900,
++        currency: "CAD",
++        condition: "new",
++        seller: "Amazon.ca",
++        availability: "in_stock",
++        deals: [lightning],
++        dealEndsAt: lightning.validUntil,
++        dealEndsEstimated: true,
++      },
++      {
++        amountMinor: 23915,
++        currency: "CAD",
+         condition: "used",
+-        otherOffers: [
+-          { condition: "new", amountMinor: 29900, currency: "CAD", count: 1 },
+-        ],
+-      }),
+-      format,
+-    ),
+-    "Also: New from $299.00",
++        seller: "Amazon Resale",
++      },
++      {
++        amountMinor: 18900,
++        currency: "CAD",
++        condition: "used",
++        seller: "Second Life Audio",
++      },
++      {
++        amountMinor: 22999,
++        currency: "CAD",
++        condition: "renewed",
++        seller: "Tech Renewed Canada",
++        availability: "out_of_stock",
++      },
++      {
++        amountMinor: 30499,
++        currency: "CAD",
++        condition: "new",
++        seller: "Gadget Hub CA",
++      },
++      { amountMinor: 25000, currency: "CAD", condition: "open_box" },
++    ],
++  });
++  const rows = offerRows(p, fmt, NOW);
++  assert.deepEqual(
++    rows.map((r) => [r.condition, r.seller, r.price]),
++    [
++      ["New", "Amazon.ca", "$289.00"],
++      ["New", "Gadget Hub CA", "$304.99"],
++      ["Open box", undefined, "$250.00"],
++      ["Renewed", "Tech Renewed Canada", "$229.99"],
++      ["Used", "Second Life Audio", "$189.00"],
++      ["Used", "Amazon Resale", "$239.15"],
++    ],
++  );
++  assert.deepEqual(
++    {
++      was: rows[0].was,
++      stock: rows[0].stock,
++      deal: rows[0].deal,
++      endsAt: rows[0].endsAt,
++      estimated: rows[0].estimated,
++    },
++    {
++      was: "$329.00",
++      stock: "In stock",
++      deal: "Lightning Deal",
++      endsAt: Date.parse(lightning.validUntil),
++      estimated: true,
++    },
+   );
++  assert.equal(rows[3].outOfStock, true);
++  assert.equal(rows[3].stock, "Out of stock");
++  // Collapsed after three until "Show all".
++  assert.equal(shownRows(rows, false).length, OFFERS_SHOWN);
++  assert.equal(shownRows(rows, true).length, 6);
++  // After the deal ends, its row shows no deal and no countdown.
++  const later = offerRows(p, fmt, Date.parse("2026-10-10T22:00:00Z"));
++  assert.equal(later[0].deal, undefined);
++  assert.equal(later[0].endsAt, undefined);
+ });
+diff --git a/apps/worker/prisma/migrations/20261015000000_offer_deal_ends/migration.sql b/apps/worker/prisma/migrations/20261015000000_offer_deal_ends/migration.sql
+new file mode 100644
+index 0000000..38ad4d1
+--- /dev/null
++++ b/apps/worker/prisma/migrations/20261015000000_offer_deal_ends/migration.sql
+@@ -0,0 +1,23 @@
++-- Each offer's deal end: when its soonest-ending deal ends, and whether that end was stated by the store (exact) or
++-- computed from the page's relative countdown plus the capture time (estimated). The capture time is the
++-- observation's observed_at; it is not repeated here. Additive: existing rows keep working unchanged.
++ALTER TABLE "price_observations"
++  ADD COLUMN "deal_ends_at" TIMESTAMPTZ(6),
++  ADD COLUMN "deal_ends_estimated" BOOLEAN NOT NULL DEFAULT false;
++
++-- Backfill from the deals already stored with each offer: until now an end was kept only when the store stated an
++-- instant with its zone, so every backfilled end is exact.
++UPDATE "price_observations" AS po
++SET "deal_ends_at" = ends.ends_at
++FROM (
++  SELECT p."observation_id", p."offer_index", min((deal ->> 'validUntil')::timestamptz) AS ends_at
++  FROM "price_observations" AS p
++  CROSS JOIN LATERAL jsonb_array_elements(
++    CASE WHEN jsonb_typeof(p."promotions") = 'array' THEN p."promotions" ELSE '[]'::jsonb END
++  ) AS deal
++  WHERE deal ->> 'validUntil' ~ '^\d{4}-\d{2}-\d{2}T[0-9:.]+(Z|[+-]\d{2}:?\d{2})$'
++  GROUP BY p."observation_id", p."offer_index"
++) AS ends
++WHERE po."observation_id" = ends."observation_id" AND po."offer_index" = ends."offer_index";
++
++CREATE INDEX "price_observations_deal_ends_idx" ON "price_observations"("deal_ends_at");
+diff --git a/apps/worker/prisma/schema.prisma b/apps/worker/prisma/schema.prisma
+index bc81e9b..015d916 100644
+--- a/apps/worker/prisma/schema.prisma
++++ b/apps/worker/prisma/schema.prisma
+@@ -101,11 +101,16 @@ model PriceObservation {
+   promotions    Json?
+   /// The seller the source names for this offer.
+   seller        String?
++  /// When this offer's soonest-ending deal ends (null: no deal end shown). The capture time is the observation's.
++  dealEndsAt    DateTime?          @map("deal_ends_at") @db.Timestamptz(6)
++  /// True when dealEndsAt was computed from a relative countdown plus the capture time, not stated by the store.
++  dealEndsEstimated Boolean        @default(false) @map("deal_ends_estimated")
+   offerUrl      String?            @map("offer_url")
+   evidence      String
+   observation   ProductObservation @relation(fields: [observationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+ 
+   @@id([observationId, offerIndex])
++  @@index([dealEndsAt], map: "price_observations_deal_ends_idx")
+   @@map("price_observations")
+ }
+ 
+diff --git a/apps/worker/src/database/capture.repository.ts b/apps/worker/src/database/capture.repository.ts
+index 2722acd..d4ba078 100644
+--- a/apps/worker/src/database/capture.repository.ts
++++ b/apps/worker/src/database/capture.repository.ts
+@@ -7,6 +7,7 @@ import { hash } from 'node:crypto';
+ import { CaptureConflictError, CaptureLeaseError } from '../pipeline/capture.errors.ts';
+ import type { CaptureResult } from '../pipeline/capture-result.ts';
+ import type { CrawlTask } from '@morydeals/capture-contracts';
++import type { Offer } from '../parsing/parsers/types.ts';
+ 
+ const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+ @Injectable()
+@@ -164,6 +165,7 @@ export class CaptureRepository {
+             availability: offer.availability,
+             condition: offer.condition,
+             seller: offer.seller,
++            ...dealEnd(offer),
+             promotions: offer.promotions?.length ? json(offer.promotions) : Prisma.DbNull,
+             offerUrl: offer.url,
+             evidence: offer.evidence,
+@@ -222,3 +224,15 @@ export class CaptureRepository {
+     }));
+   }
+ }
++/** An offer's soonest-ending deal, with whether that end was estimated from a countdown (see Promotion). */
++export function dealEnd(offer: Offer): { dealEndsAt?: Date; dealEndsEstimated?: boolean } {
++  const ends = (offer.promotions ?? [])
++    .filter((deal) => deal.validUntil && !Number.isNaN(Date.parse(deal.validUntil)))
++    .sort((a, b) => Date.parse(a.validUntil!) - Date.parse(b.validUntil!));
++  return ends.length
++    ? {
++        dealEndsAt: new Date(ends[0].validUntil!),
++        dealEndsEstimated: !!ends[0].validUntilEstimated,
++      }
++    : {};
++}
+diff --git a/apps/worker/src/parsing/parsers/parser.ts b/apps/worker/src/parsing/parsers/parser.ts
+index cc06eb3..cf9e460 100644
+--- a/apps/worker/src/parsing/parsers/parser.ts
++++ b/apps/worker/src/parsing/parsers/parser.ts
+@@ -5,6 +5,7 @@ import { resolveCurrency } from './currency.ts';
+ import {
+   aggregateRating,
+   identityUrl,
++  promotion,
+   rating,
+   schemaAvailability,
+   schemaCondition,
+@@ -181,11 +182,33 @@ function parseSources(document: PageDocument, strategy: string): ParseResult {
+           sku: text(offer.sku) ?? text(resolve(offer.itemOffered).sku),
+           options: offerOptions(offer, resolve(offer.itemOffered)),
+           validUntil: text(offer.priceValidUntil),
++          ...saleEnd(offer, specification, compareAt, price, `${path}[${i}]`),
+           evidence: `${path}[${i}]`,
+         },
+       ];
+     });
+   }
++  /**
++   * A sale with a stated end: the struck price beside an offer whose sale price (or the offer itself) is valid
++   * through an instant with its zone (`validThrough` / `validUntil`). `priceValidUntil` is not read: themes fill it
++   * with a far-off date as boilerplate, and a bare date has no zone to count down to.
++   */
++  function saleEnd(
++    offer: ObjectValue,
++    specification: ObjectValue,
++    compareAt: number | undefined,
++    price: number,
++    path: string,
++  ) {
++    if (compareAt === undefined || compareAt <= price) return {};
++    const sale = promotion('sale', 'Sale', `${path}.validThrough`, {
++      validUntil:
++        text(specification.validThrough) ??
++        text(specification.validUntil) ??
++        text(offer.validThrough),
++    });
++    return sale?.validUntil ? { promotions: [sale] } : {};
++  }
+   const seen = new Set<string>();
+   const page = identityUrl(document.url);
+   const requested = identityUrl(document.requestedUrl ?? document.url);
+diff --git a/apps/worker/src/parsing/parsers/retailers/amazon.ts b/apps/worker/src/parsing/parsers/retailers/amazon.ts
+index 85372f6..c461084 100644
+--- a/apps/worker/src/parsing/parsers/retailers/amazon.ts
++++ b/apps/worker/src/parsing/parsers/retailers/amazon.ts
+@@ -10,7 +10,14 @@ import {
+   parseRetailer,
+ } from '../shared/retailer.ts';
+ import { displayedMinorUnits } from '../money.ts';
+-import { conditionInText, promotion, textRating, variant } from '../shared/facts.ts';
++import {
++  conditionInText,
++  countdownEnd,
++  countdownMs,
++  promotion,
++  textRating,
++  variant,
++} from '../shared/facts.ts';
+ import type { Condition, Offer, Promotion } from '../types.ts';
+ 
+ function asin(value: string): string {
+@@ -110,7 +117,52 @@ function pageRating(root: HtmlNode) {
+  * Deals shown with the selected offer (the regions morydeals-affiliate reads): a clip coupon, a limited-time or
+  * lightning deal badge, a Prime member price and promotion messages. Text is kept as shown; nothing is computed.
+  */
+-function pagePromotions(root: HtmlNode, region: HtmlNode, featured = true): Promotion[] {
++/** A countdown's own words inside a badge ("Ends in 05:12:33", "5h 12m left"), dropped from the deal's text. */
++const COUNTDOWN_WORDS =
++  /\s*(?:ends?\s+in|ending\s+in|expires?\s+in)?\s*(?:\d{1,3}:[0-5]\d:[0-5]\d|(?:\d{1,4}\s*(?:d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b\s*)+)\s*(?:left)?\s*$/i;
++/**
++ * The limited-time / Lightning deal badge with what the page shows about its end. Amazon renders the time left
++ * only in the browser: the badge's screen-reader labels ("Limited-time deal NO_OF_HOURS hours NO_OF_MINUTES
++ * minutes" until the page script fills them in) and the visible timer. A filled countdown gives an estimated end:
++ * the capture time plus the time shown. A Lightning Deal's "57% claimed" is kept as stated. Nothing else is
++ * inferred: a badge with no countdown has no end.
++ */
++function amazonDeal(root: HtmlNode, capturedAt: string | undefined): Promotion | undefined {
++  const badges = all(root, '#dealBadgeSupportingText, #dealBadge_feature_div .dealBadgeTextColor')
++    .filter((node) => !hidden(node))
++    .map((node) => content(node).replace(/\s*(?:Terms|Details)\s*$/i, ''));
++  const labels = all(root, '#dealBadge_feature_div [id^="deals_countdown_timer_"]')
++    .map(content)
++    .filter((text) => /\d/.test(text) && !/NO_OF_/.test(text));
++  const timers = [
++    ...labels,
++    ...all(root, '#dealTimer_feature_div, #dealBadge_feature_div')
++      .filter((node) => !hidden(node))
++      .map(content),
++    ...badges,
++  ];
++  const countdown = timers.find((text) => countdownMs(text) !== undefined);
++  const words =
++    badges.map((text) => text.replace(COUNTDOWN_WORDS, '').trim()).find(Boolean) ??
++    labels.map((text) => text.replace(COUNTDOWN_WORDS, '').trim()).find(Boolean);
++  const claimed = /(\d{1,3})\s*%\s*claimed/i.exec(textAt(root, '#dealProgress_feature_div'));
++  return promotion(
++    'deal',
++    words,
++    countdown ? '#dealBadge_feature_div countdown' : '#dealBadgeSupportingText',
++    {
++      validUntil: countdownEnd(countdown, capturedAt),
++      validUntilEstimated: true,
++      ...(claimed ? { claimedPercent: +claimed[1] } : {}),
++    },
++  );
++}
++function pagePromotions(
++  root: HtmlNode,
++  region: HtmlNode,
++  featured: boolean,
++  capturedAt: string | undefined,
++): Promotion[] {
+   const read = (scope: HtmlNode, selector: string, type: Promotion['type']) =>
+     all(scope, selector)
+       .filter((node) => !hidden(node))
+@@ -122,11 +174,7 @@ function pagePromotions(root: HtmlNode, region: HtmlNode, featured = true): Prom
+     // Page-level badges belong to the featured new offer, never to a second-hand row.
+     ...(featured
+       ? [
+-          ...read(
+-            root,
+-            '#dealBadgeSupportingText, #dealBadge_feature_div .dealBadgeTextColor',
+-            'deal',
+-          ),
++          amazonDeal(root, capturedAt),
+           ...read(root, '#primeSavingsUpsellCaption_feature_div', 'member'),
+         ]
+       : []),
+@@ -305,7 +353,12 @@ function read(document: PageDocument, issues: string[]): Product {
+       textAt(region, '#merchant-info a[href*="seller="]');
+     const stock = textAt(region, '#availability') || textAt(region, '#outOfStock');
+     const evidence = `${purchaseRegion}/${rowName ?? 'featured'}${center ? ` + #${center.attribs.id}` : ''}`;
+-    const promotions = pagePromotions(root, region, entry.kind !== 'second-hand');
++    const promotions = pagePromotions(
++      root,
++      region,
++      entry.kind !== 'second-hand',
++      document.fetchedAt,
++    );
+     return {
+       amountMinor: current,
+       ...(former != null && former > current
+diff --git a/apps/worker/src/parsing/parsers/retailers/bestbuy.ts b/apps/worker/src/parsing/parsers/retailers/bestbuy.ts
+index 23e8ac3..d2f1154 100644
+--- a/apps/worker/src/parsing/parsers/retailers/bestbuy.ts
++++ b/apps/worker/src/parsing/parsers/retailers/bestbuy.ts
+@@ -162,11 +162,15 @@ function read(document: PageDocument, issues: string[]): Product {
+     `${evidence}.regularPrice`,
+     issues,
+   );
+-  // A sale below the regular price, ending at saleEndDate (epoch ms or an ISO instant), as morydeals-price reads it.
++  // A sale below the regular price, ending at saleEndDate (epoch ms or an ISO instant with its offset), as
++  // morydeals-price reads it: an exact end, the one the page counts down to. When Best Buy itself hides the end
++  // (hideSaleEndDate), the page shows none, and none is kept.
+   const end =
+-    typeof product.saleEndDate === 'number'
+-      ? new Date(product.saleEndDate).toISOString()
+-      : product.saleEndDate;
++    product.hideSaleEndDate === true
++      ? undefined
++      : typeof product.saleEndDate === 'number'
++        ? new Date(product.saleEndDate).toISOString()
++        : product.saleEndDate;
+   const sale =
+     product.isOnSale === true && former.compareAtAmountMinor
+       ? promotion('sale', 'Sale', `${evidence}.isOnSale`, { validUntil: end })
+diff --git a/apps/worker/src/parsing/parsers/shared/facts.ts b/apps/worker/src/parsing/parsers/shared/facts.ts
+index c7d01ad..6e617d4 100644
+--- a/apps/worker/src/parsing/parsers/shared/facts.ts
++++ b/apps/worker/src/parsing/parsers/shared/facts.ts
+@@ -91,11 +91,54 @@ export function conditionInText(value: string | undefined): Condition | undefine
+  * A promotion with shopper-facing text: words (not a bare number), short, and not a field name or JSON. Anything
+  * else is no promotion (morydeals-price `source_promotion` applies the same rule).
+  */
++const UNIT_MS: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000 };
++/**
++ * A running countdown's remaining time in ms: "Ends in 5h 12m", "5 hours 12 minutes", "05:12:33", "1 day 3 hrs".
++ * A countdown without hours, minutes or seconds ("Ends in 2 days") is too coarse to time a deal by, and gives none.
++ */
++export function countdownMs(value: string | undefined): number | undefined {
++  if (!value || /NO_OF_/i.test(value)) return;
++  const clock = /\b(\d{1,3}):([0-5]\d):([0-5]\d)\b/.exec(value);
++  let total = 0;
++  let fine = false;
++  if (clock) {
++    total = (+clock[1] * 3600 + +clock[2] * 60 + +clock[3]) * 1000;
++    fine = true;
++  }
++  const rest = clock ? value.replace(clock[0], ' ') : value;
++  for (const match of rest.matchAll(
++    /(\d{1,4})\s*(d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b/gi,
++  )) {
++    const unit = match[2][0].toLowerCase();
++    total += +match[1] * UNIT_MS[unit];
++    if (unit !== 'd') fine = true;
++  }
++  return fine && total > 0 && total < 30 * UNIT_MS.d ? total : undefined;
++}
++/** A countdown's end: the capture time plus the time it showed left (see countdownMs), as a UTC instant. */
++export function countdownEnd(value: string | undefined, capturedAt: string | undefined) {
++  const left = countdownMs(value);
++  const at = capturedAt ? Date.parse(capturedAt) : NaN;
++  return left === undefined || Number.isNaN(at) ? undefined : new Date(at + left).toISOString();
++}
++/** The kind of time-limited deal its own words name; nothing when they name none. */
++export function dealKind(words: string): Promotion['kind'] {
++  if (/lightning/i.test(words)) return 'lightning';
++  if (/deal of the day/i.test(words)) return 'deal_of_the_day';
++  if (/limited[-\s]?time/i.test(words)) return 'limited_time';
++  return undefined;
++}
+ export function promotion(
+   type: Promotion['type'],
+   value: unknown,
+   evidence: string,
+-  extra: { code?: unknown; effectiveMinor?: number; validUntil?: unknown } = {},
++  extra: {
++    code?: unknown;
++    effectiveMinor?: number;
++    validUntil?: unknown;
++    validUntilEstimated?: boolean;
++    claimedPercent?: number;
++  } = {},
+ ): Promotion | undefined {
+   const words = text(value);
+   if (
+@@ -119,6 +162,13 @@ export function promotion(
+       ? { effectiveMinor: extra.effectiveMinor }
+       : {}),
+     ...(instant ? { validUntil: instant } : {}),
++    ...(instant && extra.validUntilEstimated ? { validUntilEstimated: true as const } : {}),
++    ...(type === 'deal' && dealKind(words) ? { kind: dealKind(words) } : {}),
++    ...(extra.claimedPercent !== undefined &&
++    extra.claimedPercent >= 0 &&
++    extra.claimedPercent <= 100
++      ? { claimedPercent: extra.claimedPercent }
++      : {}),
+     evidence,
+   };
+ }
+diff --git a/apps/worker/src/parsing/parsers/types.ts b/apps/worker/src/parsing/parsers/types.ts
+index 5f3f846..8212948 100644
+--- a/apps/worker/src/parsing/parsers/types.ts
++++ b/apps/worker/src/parsing/parsers/types.ts
+@@ -38,8 +38,17 @@ export interface Promotion {
+   code?: string;
+   /** A price the source itself states for this promotion ("$79.99 with coupon"); never computed. */
+   effectiveMinor?: number;
+-  /** When the deal ends, only when the source gives an instant with its zone (stored as UTC). */
++  /**
++   * When the deal ends (UTC): the instant the source states with its zone, or, when the page shows only a running
++   * countdown ("Ends in 5h 12m"), the capture time plus that countdown (then `validUntilEstimated`). Never guessed.
++   */
+   validUntil?: string;
++  /** validUntil was computed from the page's relative countdown and the capture time, not stated by the source. */
++  validUntilEstimated?: true;
++  /** The kind of time-limited deal the source names ("Lightning Deal", "Deal of the Day", "Limited-time deal"). */
++  kind?: 'lightning' | 'deal_of_the_day' | 'limited_time';
++  /** How much of a Lightning Deal is claimed, as the page states it ("57% claimed"). */
++  claimedPercent?: number;
+   evidence: string;
+ }
+ 
+diff --git a/apps/worker/src/parsing/parsers/version.ts b/apps/worker/src/parsing/parsers/version.ts
+index 2fb3338..ebfd813 100644
+--- a/apps/worker/src/parsing/parsers/version.ts
++++ b/apps/worker/src/parsing/parsers/version.ts
+@@ -1 +1 @@
+-export const PARSER_VERSION = '3.14.0';
++export const PARSER_VERSION = '3.15.0';
+diff --git a/apps/worker/test/fixtures/retailers/README.md b/apps/worker/test/fixtures/retailers/README.md
+index 6b6b8b8..b699ebc 100644
+--- a/apps/worker/test/fixtures/retailers/README.md
++++ b/apps/worker/test/fixtures/retailers/README.md
+@@ -21,3 +21,7 @@ separately in `docs/crawler/retailer-verification.md`.
+ `amazon-conditions-synthetic-B0CHX1W1XY.html` is synthetic (written for this project, not a capture): a reduced
+ desktop accordion buy box (new, used and Subscribe & Save rows) and an open "All offers" panel, to test that every
+ condition is collected and kept apart.
++
++`amazon-deal-B0BGJT87N2.html` is morydeals-affiliate's `razer-hyperspeed.html` (reduced from a live response),
++copied unchanged: a desktop page with a running "Limited-time deal" badge whose countdown labels are still the
++page's unfilled templates (`NO_OF_HOURS`…). Tests fill them in to exercise countdown reading.
+diff --git a/apps/worker/test/fixtures/retailers/amazon-deal-B0BGJT87N2.html b/apps/worker/test/fixtures/retailers/amazon-deal-B0BGJT87N2.html
+new file mode 100644
+index 0000000..ee198cd
+--- /dev/null
++++ b/apps/worker/test/fixtures/retailers/amazon-deal-B0BGJT87N2.html
+@@ -0,0 +1,610 @@
++<!-- Reduced from live B0BGJT87N2 response; dynamic session/tracking fields omitted. -->
++<span id="productTitle" class="a-size-medium product-title-word-break">        Razer Naga V2 HyperSpeed Wireless MMO Gaming Mouse, 400 Hr Battery, Black       </span>      
++<input id="ASIN" name="ASIN" value="B0BGJT87N2">
++              
++<input id="attach-currency-of-preference" value="CAD">
++    
++<div id="desktop_buybox" class="celwidget" data-csa-c-asin="">
++                               <div id="buybox">
++                                            <div>
++                    <div id="gsod_singleOfferDisplay_Desktop" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                              <div id="qualifiedBuybox" class="celwidget">
++                                                    <div class="a-section">  <form id="addToCart" class="a-content">
++             <!-- sp:csrf --><!-- sp:end-csrf -->
++                             <input name="items[0.base][customerVisiblePrice][currencyCode]" value="CAD" id="items[0.base][customerVisiblePrice][currencyCode]">  <input id="ASIN" name="ASIN" value="B0BGJT87N2">
++              <input id="merchantID" name="merchantID" value="A3DWYIK6Y9EEQB">
++              <div class="a-box-group">          <style>
++.gb_box_info {border-color:#bbd3de;}
++.gb_box_error {border-color:#c40000;}
++.gb_box_warn {border-color:#8b6e00;}
++.gb_box_success {border-color:#89cd89;}
++.gb_box_in_cart {background-color: #e7f2ef; border-radius: 3px;}
++.gb_alert_in_cart {padding-top: 1px}
++</style>
++
++     <div class="a-box a-last"><div class="a-box-inner">  <div class="a-section a-spacing-none a-padding-none">                                      <div id="renewedSingleOfferHeader" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               <div id="renewedSingleOfferCaption_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                     </div>
++                                    </div>
++                                      <div id="booksHeaderInfoContainer" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="apex_offerDisplay_desktop" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                              <div>
++                                             <div id="corePrice_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                       <div>
++                                                       <div class="a-section a-spacing-micro">                                                  <div class="a-section apex-core-price-identifier">      <span class="a-price aok-align-center apex-pricetopay-value"><span class="a-offscreen">$89.99</span><span><span class="a-price-symbol">$</span><span class="a-price-whole">89<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span></span></span>        <span id="taxInclusiveMessage" class="a-size-mini a-color-base aok-align-center aok-nowrap">  </span>           </div>        </div>            </div>
++                                                          </div>
++                                <div id="regulatoryDeposit_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                    </div>
++        </div>
++                                     </div>
++                                      <div id="desktop_qualifiedBuyBox" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                  <div class="a-section a-spacing-none a-padding-none">                                      <div id="primeEarlyAccessCountDownTimer_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="dealProgress_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                 </div>
++                                      <div id="invitePlatform_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="apex_offerDisplay_single_desktop" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                       <div id="layawayBuyboxMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                             </div>
++                                <div id="promotionMessageInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                <div id="booksAdditionalPriceInfoContainer" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="pointsInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                      </div>
++                                <div id="agsShippingAndIfdInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                      <!-- For LightningDeal use case, agsShippingAndIfdInsideBuyBox is only configured on regular offer, so set defaultPageContext as buyingPrice -->
++                                 </div>
++                                <div id="ehf_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                 <div class="a-section a-spacing-base a-spacing-top-small"> <span class="a-declarative"> <a id="ehfShortDisclaimer" class="a-popover-trigger a-declarative"> $0.55 eco fee might apply <i class="a-icon a-icon-popover"></i></a> </span> <div class="a-popover-preload" id="a-popover-ehfLongDisclaimer"> <p> Environmental handling fees are charged to cover recycling of certain products. The fee depends on the shipping destination, type, size, and weight of the item. The eco fee will be added to your order at checkout.  <a class="a-link-normal"> Learn more </a> </p> </div> </div>                                </div>
++                                <div id="shippingMessageInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                       <div class="a-section a-spacing-base a-text-left">                                                            <span id="price-shipping-message" class="a-size-base a-color-base"></span>        </div>                                     </div>
++                                <div id="amazonGlobal_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                           </div>
++                                <div id="couponsInBuybox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                          </div>
++                                <div id="deliveryBlockContainer" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               <div id="deliveryBlock_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                           <div id="deliveryBlockMessage" class="a-section a-spacing-none"><div id="mir-layout-DELIVERY_BLOCK"><div class="a-spacing-base" id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"><span> FREE delivery <span class="a-text-bold">Thursday, October 1</span> </span></div><div class="a-spacing-base" id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"><span> Or fastest delivery <span class="a-text-bold">Tomorrow, September 28</span>. Order within <span id="ftCountdown" class="ftCountdownClass">4 hrs 28 mins</span> </span></div></div></div></div>
++                                      <div id="cipInsideDeliveryBlock_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                    <span class="a-declarative"> <a id="contextualIngressPtLink" class="a-link-normal"> <div class="a-row a-spacing-small"> <div class="a-column a-span12 a-text-left"> <div id="contextualIngressPt">
++                        <div id="contextualIngressPtPin"></div>
++                        <span id="contextualIngressPtLabel" class="cip-a-size-small">
++                            <div id="contextualIngressPtLabel_deliveryShortLine">Delivering to Richmond V7C – Update location</div>
++                        </span>
++                    </div>
++                </div> </div> </a> </span>                                 </div>
++                                    </div>
++                                <div id="deliveryPromiseInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                             </div>
++                                <div id="deepCheckPromiseInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                 </div>
++                                <div id="promiseBasedBadgeInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                 <div class="a-section a-spacing-none a-text-left">                                      </div>                                    </div>
++                                 </div>
++                                      <div id="valuePropBuybox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                      <div id="addOnMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                            </div>
++                                      <div id="returnPolicyIntervention_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                   </div>
++                                      <div id="availabilityInsideBuyBox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              <div class="a-section a-spacing-none">                                       <div id="availability" class="a-section a-spacing-base a-spacing-top-micro }">                               <span class="a-size-medium a-color-success primary-availability-message"> In Stock </span>                <br>        </div>         <div class="a-section a-spacing-none">  </div>                <div class="a-section a-spacing-mini">    </div>   <style>
++    .availabilityMoreDetailsIcon {
++        width: 12px;
++        vertical-align: baseline;
++        fill: #969696;
++    }
++</style> </div>                                 </div>
++                                      <div id="quantityLimitExhaustionAOD_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                </div>
++                                      <div id="alternativeProductMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="globalStoreBadgePopoverInsideBuybox_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                 </div>
++                                      <div id="quantityRelocate_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                       <div class="a-section a-spacing-base a-text-left">           <style>
++    /* Adding this CSS to overridden the green badging styles */
++    #bmsmMessaging span.a-text-bold {
++        font-weight: normal !important;
++        background-color: #7fda69;
++        padding: 2px 6px;
++    }
++
++    #bmsmMessaging {
++        font-weight: normal !important;
++        margin-bottom: 12px !important;
++        text-align: initial;
++        display:  none;
++    }
++
++    /* Only display quantity discount on qualified buy box; excluding pickup and other buy box */
++    #qualifiedBuybox #bmsmMessaging {
++        display: block !important;
++    }
++
++    #bmsmMessaging .a-color-success {
++        color: black !important;
++    }
++
++    @media (min-width: 801px){
++        #bmsmMessaging span{
++            font-size: 14px !important;
++        }
++    }
++
++    /* mobile screen */
++    @media (max-width: 800px){
++        #bmsmMessaging span{
++            font-size: 15px !important;
++        }
++
++        #bmsmMessaging span.a-text-bold {
++            margin-right: 5px;
++        }
++    }
++
++</style>
++                                                                                                      <div id="selectQuantity" class="a-section a-spacing-none a-padding-none improvedQuantityButton"> <span class="a-declarative"> <div class="a-row a-spacing-base">   <div class="a-column a-span12 a-text-left">          <span class="a-dropdown-container"><label class="a-native-dropdown">Quantity:</label><select name="quantity" id="quantity" class="a-native-dropdown a-declarative">     <option value="1">1 </option>       <option value="2">2 </option>       <option value="3">3 </option>       <option value="4">4 </option>       <option value="5">5 </option>       <option value="6">6 </option>       <option value="7">7 </option>       <option value="8">8 </option>       <option value="9">9 </option>       <option value="10">10 </option>       <option value="11">11 </option>       <option value="12">12 </option>       <option value="13">13 </option>       <option value="14">14 </option>       <option value="15">15 </option>       <option value="16">16 </option>       <option value="17">17 </option>       <option value="18">18 </option>       <option value="19">19 </option>       <option value="20">20 </option>       <option value="21">21 </option>       <option value="22">22 </option>       <option value="23">23 </option>       <option value="24">24 </option>       <option value="25">25 </option>       <option value="26">26 </option>       <option value="27">27 </option>       <option value="28">28 </option>       <option value="29">29 </option>       <option value="30">30 </option>            </select><span class="a-button a-button-dropdown"><span class="a-button-inner"><span class="a-button-text a-declarative"><span class="a-dropdown-label">Quantity:</span><span class="a-dropdown-prompt">1</span></span><i class="a-icon a-icon-dropdown"></i></span></span></span> </div>      </div>  </span> </div>                                       </div>                                       </div>
++                                      <div id="soldByThirdPartyRelocate_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                     </div>
++                                      <div id="twisterPlusPriceSubtotalWWDesktop_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                           <div id="tp_price_update_feature_ww" class="a-section price-update-feature-ww aok-hidden"> <div id="tp_price_row_ww" class="a-section a-spacing-small price-update-row-ww aok-hidden">   <span id="price_block_currency_symbol_ww" class="a-size-medium a-price-symbol">$</span><!--Adding space based
++ on hasSpace --><!--To remove span
++    space--><!--To remove
++span space--><span class="a-size-medium a-text-bold"><!--To
++remove span space--><span id="tp_price_block_total_price_ww" class="a-price"><span class="a-offscreen">$89.99</span><span><span class="a-price-symbol"></span><span class="a-price-whole">89<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span></span></span><!--To remove
++span space--></span><!--To remove
++span space--> <span id="tp-price-update-payment-period" class="a-size-medium a-color-price aok-hidden"> <span id="tp-price-update-payment-term"></span>
++                    (<span id="tp-price-update-payment-term-length"></span>)
++            </span> <span id="tp_options_detail" class="a-size-base aok-hidden"> Includes selected options. </span> <span id="tp_monthly_options_detail" class="a-size-base aok-hidden"> Includes initial monthly payment and selected options. </span>       <span class="a-size-base"> <span class="a-declarative"> <span>
++                        <a id="price_block_total_price_details_ww" class="a-link-normal"> Details </a> </span>
++                </span> <div class="a-popover-preload" id="a-popover-twisterPlusPopOver"> <div id="twister-plus-popover-inner" class="a-section">   <div id="twister-plus-tool-tip" class="a-section twister-plus-tool-tip-container"> <div id="tp-tool-tip-price-section" class="a-section a-spacing-base a-spacing-top-base"> <div id="tp-tool-tip-price-block" class="a-fixed-right-grid a-spacing-small"><div class="a-fixed-right-grid-inner">  <div class="a-fixed-right-grid-col a-col-left"> <span id="display-string" class="a-size-base">Price</span> <span class="a-size-base tp-tool-tip-quantity-block aok-hidden"> <span class="a-offscreen"></span> <span> <span> (</span><!-- Adding comment to avoid span
++                        space--><!-- Adding comment to avoid span
++                        space--><span class="a-price-symbol">$</span><!-- Adding space based on
++                        hasSpace--><!-- To remove span
++                        space--><!-- To remove span
++                        space--><span class="a-price-whole">89<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span><!-- To remove span
++                        space--><!-- Adding comment to avoid span
++                        space--><span>x<span id="tp-item-quantity"></span>)</span> </span> </span> </div> <div class="a-text-right a-fixed-right-grid-col a-col-right"> <span id="tp-tool-tip-price" class="a-size-base twister-plus-price-template"> <span class="a-offscreen"></span> <span> <span id="price-sign-string" class="a-size-base"></span>  <span class="a-price-symbol">$</span><!-- Adding space based on
++                 hasSpace--><!-- To remove span
++                space--><!-- To remove span
++                space--><span class="a-price-whole">89<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span><!-- To remove span
++                space--> </span> </span> </div> </div></div> </div> <hr class="a-spacing-small a-divider-normal"> <div id="twister-plus-tool-tip-subtotal-section" class="a-section a-spacing-base"> <div id="tp-tool-tip-subtotal-price-block" class="a-fixed-right-grid a-spacing-small"><div class="a-fixed-right-grid-inner"> <div class="a-fixed-right-grid-col a-col-left"> <span id="display-string" class="a-size-base">Subtotal</span> </div> <div class="a-text-right a-fixed-right-grid-col a-col-right"> <span class="a-size-medium twister-plus-subtotal-price-template">  <span id="tp-tool-tip-subtotal-price-currency-symbol" class="a-size-medium a-price-symbol">$</span><!-- Adding space based on
++            hasSpace--><!--To remove span
++            space--><!--To remove span
++            space--><span class="a-size-medium a-text-bold"><!--To
++                    remove span space--><span id="tp-tool-tip-subtotal-price-value" class="a-price"><span class="a-offscreen">$89.99</span><span><span class="a-price-symbol"></span><span class="a-price-whole">89<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span></span></span><!--To remove span
++            space--></span><!--To remove span
++            space--> </span> </div> </div></div> <div id="tp-tool-tip-monthly-payment-subtotal-price-block" class="a-fixed-right-grid aok-hidden a-spacing-small"><div class="a-fixed-right-grid-inner"> <div class="a-fixed-right-grid-col a-col-left"> <span id="display-string" class="a-size-base">Subtotal</span> </div> <div id="tp-monthly-payment-subtotal-price" class="a-text-right a-fixed-right-grid-col a-col-right"> </div> </div></div> <div id="twister-plus-order-level-monthly-payments-section" class="a-section aok-hidden"> <hr class="a-spacing-small a-divider-normal"> <div id="tp-tool-tip-order-level-monthly-payments-price-block" class="a-fixed-right-grid a-spacing-small"><div class="a-fixed-right-grid-inner"> <div class="a-fixed-right-grid-col a-col-left"> <span id="display-string" class="a-size-base a-text-bold"></span> </div> <div id="tp-order-level-monthly-payment-subtotal-price" class="a-text-right a-fixed-right-grid-col a-col-right"> </div> </div></div> </div> <div id="twister-plus-item-level-monthly-payments-section" class="a-section aok-hidden"> <hr id="twister-plus-monthly-payments-divider" class="a-spacing-small a-divider-normal"> <div id="tp-monthly-payments-breakdown-section" class="a-section"> <span class="a-text-bold">Initial payment breakdown</span> </div> <hr class="a-spacing-small a-divider-normal"> <div id="tp-tool-tip-item-level-monthly-payments-price-block" class="a-fixed-right-grid a-spacing-small"><div class="a-fixed-right-grid-inner"> <div class="a-fixed-right-grid-col a-col-left"> </div> <div id="tp-item-level-monthly-payment-subtotal-price" class="a-text-right a-fixed-right-grid-col a-col-right"> </div> </div></div> </div> <div id="tp-tool-tip-footnote-section" class="a-section a-spacing-small"> <span id="tp-footnote-text" class="a-size-small a-color-secondary">Shipping cost, delivery date and order total (including tax) shown at checkout.</span> 
++        </div> <div id="tp-tool-tip-strings" class="a-section a-spacing-small aok-hidden"> <span id="tp-tool-tip-item-strings"> </span> <span id="tp-tool-tip-footnote-string"> </span> </div> </div> </div>  </div> </div> </span> </div> </div>                                  </div>
++                                      <div id="gestalt_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                      <div id="exportAlternativeWidget_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                            </div>
++                                      <div id="amazonOpticsCustomize_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                      <div id="addToCart_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                                                                  <div class="a-button-stack">      <span class="a-declarative" id="atc-declarative"> <span id="submit.add-to-cart" class="a-button a-spacing-small a-button-primary a-button-icon"><span class="a-button-inner"><i class="a-icon a-icon-cart"></i><span id="submit.add-to-cart-announce" class="a-button-text">Add to cart</span></span></span> </span>    </div>             <div class="dp-cif aok-hidden"></div>
++    </div>
++                                      <div id="buyNow_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                               <div class="a-button-stack">  <div id="buyNow" class="a-section a-spacing-base">                 <div id="turboState" class="a-section a-spacing-none a-padding-none turbo-checkout-state-root">     </div>  <span class="a-declarative" id="turbo-checkout-modal"></span>                <span id="submit.buy-now" class="a-button a-button-oneclick a-button-icon onml-buy-now-button"><span class="a-button-inner"><i class="a-icon a-icon-buynow"></i><span id="submit.buy-now-announce" class="a-button-text"> Buy Now </span></span></span>    </div> </div>                                         </div>
++                                      <div id="merchConfigure_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                         </div>
++                                      <div id="twisterPlusBuyBoxMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                   <div class="a-section"> <div class="a-box a-alert-inline a-alert-inline-error tp-bbm-info-message-container aok-hidden a-spacing-base"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert"></i><div class="a-alert-content"> <span class="tp-bbm-info-message"> The enhancements that you chose aren't available for this seller. </span>       <span class="a-declarative"> <a id="tp_bbm_info_message_details" class="a-size-base a-link-normal"> Details </a> </span> <div class="a-popover-preload" id="a-popover-twisterPlusBuyBoxMessagePopOver"> <div id="tp-bbm-popover-inner" class="a-section">  <div id="twister-plus-unavailable-items-tool-tip" class="a-section twister-plus-unavailable-items-tool-tip"> <div class="a-section"> <span id="tp_bbm_info_message" class="a-size-base"> To add the following enhancements to your purchase, choose a different seller. </span> </div> <hr class="a-spacing-base a-divider-text"> <div class="a-section twister-plus-unavailable-message-item-template aok-hidden"> <span class="a-size-base a-text-bold">%cardName%</span> </div> </div>  </div> </div> </div></div></div> <div class="a-box a-alert-inline a-alert-inline-error tp-bbm-info-message-with-card-name-container aok-hidden a-spacing-base"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert"></i><div class="a-alert-content"> <span class="tp-bbm-info-message-with-card-name"> ${cardName} not available for the seller that you chose </span> </div></div></div> <div class="a-box a-alert-inline a-alert-inline-error tp-bbm-info-message-quantity-restriction-container aok-hidden a-spacing-base"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert"></i><div class="a-alert-content"> <span class="tp-bbm-info-message-quantity-restriction"> ${cardName} unavailable for quantities greater than ${maxQuantity}. </span> </div></div></div> </div>                                 </div>
++                                      <div id="secureTransactionODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="offerDisplayFeatures_desktop" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                               <div id="offer-display-features" class="a-section a-spacing-base offer-display-features"> <div class="a-row a-expander-container a-expander-partial-collapse-container offer-display-features-expander"> <div class="a-expander-content a-expander-partial-collapse-content"> <div class="odf-grid-max-50-50-columns offer-display-features-container">
++                                                                <div id="secureTransactionFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                         </div>
++                                      <div id="fulfillerInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                      </div>
++                                      <div id="merchantInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                  <div class="offer-display-feature-label celwidget a-size-small">
++        <div class="a-spacing-none">
++            <span class="a-size-small a-color-tertiary">Shipper / Seller</span> </div>
++    </div>
++ <div class="offer-display-feature-text a-size-small">
++                                     <div class="offer-display-feature-text a-spacing-none odf-truncation-popover">
++            <span class="a-size-small offer-display-feature-text-message"><a>Amazon.ca</a></span> </div>
++                                               <span class="a-declarative"> <a class="a-link-normal a-popover-trigger a-declarative odf-truncation-popover aok-hidden"> <span class="a-size-small offer-display-feature-text-message">Amazon.ca</span> </a> </span>   <div class="a-popover-preload" id="a-popover-offerDisplayFeatureMerchantInfoPopover-0"> <div class="a-section a-padding-none">  <div class="a-row a-spacing-base">  <span class="a-text-bold">Shipper / Seller</span> </div>  <div class="a-row a-spacing-micro odf-popover-overflow-wrap">    <a>Amazon.ca</a>    </div>  </div> </div>             </div>                                   </div>
++                                      <div id="staticPremiumBrandSourcedOfferDisplayFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                      <div id="conditionGuideFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                            </div>
++                                      <div id="returnsInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                       <div class="offer-display-feature-label celwidget a-size-small">
++        <div class="a-spacing-none">
++            <span class="a-size-small a-color-tertiary">Returns</span> </div>
++    </div>
++ <div class="offer-display-feature-text a-size-small">
++                                        <span class="a-declarative"> <a class="a-link-normal a-popover-trigger a-declarative"> <span class="a-size-small offer-display-feature-text-message">Eligible for Return, Refund or Replacement within 30 days of receipt</span> </a> </span>   <div class="a-popover-preload" id="a-popover-offerDisplayFeatureReturnsPopover-0"> <div class="a-section a-padding-base">  <div class="a-row a-spacing-base">  <span class="a-text-bold">Eligible for Return, Refund or Replacement within 30 days of receipt</span> </div>  <div class="a-row a-spacing-micro">    This item can be returned in its original condition for a full refund or replacement within 30 days of receipt.    </div>  <div class="a-row a-spacing-micro"> <a id="desktop-return-info-link-text" class="a-link-normal"> Read full return policy </a> </div>  </div> </div>             </div>                                  </div>
++                                      <div id="secureTransactionReorderT1_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                            </div>
++                                      <div id="supportInformationFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                            </div>
++                                      <div id="customerServiceInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="sourceMerchantInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                            </div>
++                                      <div id="packageInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="giftWrapInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="conditionInfoFeature_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                            </div>
++                                      <div id="secureTransactionReorderT2_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                      <div id="dynamicOfferDisplayFeatures_desktop" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                              <div id="offer-display-dynamic-features" class="offer-display-dynamic-features aok-hidden">
++                                        <div id="dynamicSecureTransactionFeature_feature_div" class="celwidget pd_rd_w-nCMNQ pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9" data-csa-c-asin="B0BGJT87N2">
++                                                                       <div class="offer-display-feature-label celwidget pd_rd_w-nCMNQ pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9 a-size-small">
++        <div class="a-spacing-none">
++            <span class="a-size-small a-color-tertiary">Payment</span> </div>
++    </div>
++ <div class="offer-display-feature-text a-size-small">
++                                        <span class="a-declarative"> <a class="a-link-normal a-popover-trigger a-declarative"> <span class="a-size-small offer-display-feature-text-message">Secure transaction</span> </a> </span>   <div class="a-popover-preload" id="a-popover-offerDisplayFeatureSecureTransactionPopover-0"> <div class="a-section a-padding-base">  <div class="a-row a-spacing-base">  <span class="a-text-bold">Your transaction is secure</span> </div>  <div class="a-row a-spacing-micro">    We work hard to protect your security and privacy. Our payment security system encrypts your information during transmission. We don’t share your credit card details with third-party sellers, and we don’t sell your information to others.    <a class="a-link-normal a-nowrap"> <span class="a-size-small">Learn more</span> </a>  </div>  </div> </div>             </div>                                    </div>
++                                         <div id="dynamicCustomerServiceInfoFeature_feature_div" class="celwidget pd_rd_w-qHxFu pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                         <div id="dynamicGiftWrapInfoFeature_feature_div" class="celwidget pd_rd_w-eqXZU pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9" data-csa-c-asin="B0BGJT87N2">
++                                                           <div class="offer-display-feature-label celwidget pd_rd_w-eqXZU pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9 a-size-small">
++        <div class="a-spacing-none">
++            <span class="a-size-small a-color-tertiary">Gift options</span> </div>
++    </div>
++ <div class="offer-display-feature-text a-size-small">
++               <!-- Gets the template from Gifting team's package. Other files will be added here for other use cases with same content type  -->
++                     <span class="a-declarative"> <a class="a-link-normal a-popover-trigger a-declarative"> <div class="offer-display-feature-text">
++                    <span class="a-size-small offer-display-feature-text-message gift-wrap-message"> Available at checkout </span> </div>
++                 <div class="aok-hidden">
++                    <span class="gift-wrap-unchecked-message"> Available at checkout </span> <span class="gift-wrap-checked-message"> This item is a gift. Change </span> </div>
++            </a> </span>   <div class="a-popover-preload" id="a-popover-offerDisplayFeatureGiftWrapPopover-0"> <div class="a-section a-padding-base"> <div class="a-row a-spacing-base"> At checkout, you can add a custom message, a gift receipt for easy returns and have the item gift-wrapped </div>  <div class="a-row a-spacing-micro"> <div class="a-checkbox odf-gift-wrap"><label><i class="a-icon a-icon-checkbox"></i><span class="a-label a-checkbox-label">Add gift options at checkout</span></label></div> </div>  </div> </div>  <div class="a-checkbox aok-hidden"><label><i class="a-icon a-icon-checkbox"></i><span class="a-label a-checkbox-label"></span></label></div>         </div>                                    </div>
++                                         <div id="dynamicConditionInfoFeature_feature_div" class="celwidget pd_rd_w-utD4z pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                         <div id="dynamicSupportInformationFeature_feature_div" class="celwidget pd_rd_w-ONTe7 pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9" data-csa-c-asin="B0BGJT87N2">
++                                                           <div class="offer-display-feature-label celwidget pd_rd_w-ONTe7 pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9 a-size-small">
++        <div class="a-spacing-none">
++            <span class="a-size-small a-color-tertiary">Support</span> </div>
++    </div>
++ <div class="offer-display-feature-text a-size-small">
++                                        <span class="a-declarative"> <a class="a-link-normal a-popover-trigger a-declarative"> <span class="a-size-small offer-display-feature-text-message">Product support included</span> </a> </span>   <div class="a-popover-preload" id="a-popover-offerDisplayFeatureSupportPopover-0"> <div class="a-section a-padding-base">  <div class="a-row a-spacing-base">  <span class="a-text-bold">What's product support?</span> </div>  <div class="a-row a-spacing-micro">    In the event that your product does not work as expected or you need help using it, Amazon offers free product support. To access this option, go to Your Orders and choose Get product support.    </div>  </div> </div>             </div>                                   </div>
++                                         <div id="dynamicPackageInfoFeature_feature_div" class="celwidget pd_rd_w-l1gi9 pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                         <div id="dynamicSourceMerchantInfoFeature_feature_div" class="celwidget pd_rd_w-oXsY8 pd_rd_r-1R8E1KKYQCTNT544GK0R pd_rd_wg-SaCt9" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++         </div>
++                          </div>
++           </div>
++                    </div> <div class="a-row"> <div class="a-expander-header a-expander-partial-collapse-header a-size-small odf-expander-heading"><div class="a-expander-content-fade"></div><a class="a-declarative"><i class="a-icon a-icon-extender-expand"></i><span class="a-expander-prompt">See more</span></a></div> </div> </div> </div>                                 </div>
++                                      <div id="shipsFromSoldByODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                          </div>
++                                      <div id="sfsbLegalMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                     </div>
++                                      <div id="addonItems_books_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                </div>
++                                      <div id="sellerCertificationsODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                 </div>
++                                      <div id="valuePropT2_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                          </div>
++                                      <div id="returnPolicyODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="supportInformationODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="packagingODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                          </div>
++                                      <div id="hbaLabel_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                      <div id="tradeInInstantSavings_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="quantityLayoutHigh_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                      </div>
++                                      <div id="bbop_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                     </div>
++                                      <div id="businessPricing_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="soldByThirdParty_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                   </div>
++                                      <div id="scheduledDelivery_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="mbb_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="desktop_productInsurance_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="quantityLayoutLow_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                      </div>
++                                      <div id="asg_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="twisterPlusPriceSubtotalWWDesktop_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="addToCart_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                        </div>
++                                      <div id="preAddToCartFramework_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                               </div>
++                                      <div id="buyNow_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                       </div>
++                                      <div id="twisterPlusBuyBoxMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="secureTransactionODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                      <div id="oneClick_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                    <div id="OneClickBox" class="a-button-stack">         </div>                                  </div>
++                                      <div id="giftingODF_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="makoPreRegistration" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                 <!--
++TODO:
++We use the invitePlatform's view model to make the account linking checkbox Invite/EMWR aware.
++Ideally we would be checking invite status from the view model factory but AAPI does not have an invite subresource
++Tracking in CXE-5905
++-->
++ <!-- Save preRegistration show status into a JSTL variable to override for invite ASINs that a customer does not have an invite for -->
++                             </div>
++                                      <div id="accessoryUpsellAmabot_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                      <div id="accessoryUpsellBtf_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                          </div>
++                                      <div id="unifiedLocation_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++           </div>                                </div>
++                                      <div id="digitalDashHighProminence_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++                                      <div id="marsAccessoryUpsell_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                      <div id="addToWishlist_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                    <hr class="a-spacing-base a-divider-normal">                                <div id="wishlistButtonStack" class="a-button-stack">                                            <div id="add-to-wishlist-button-group" class="a-button-group a-declarative a-spacing-none">     <span id="wishListMainButton" class="a-button a-button-groupfirst a-spacing-none a-button-base"><span class="a-button-inner"><a name="submit.add-to-registry.wishlist.unrecognized" class="a-button-text a-text-left"> Add to Wish List </a></span></span>    </div>      <div id="atwl-inline-spinner" class="a-section a-hidden"> <div class="a-spinner-wrapper"><span class="a-spinner a-spinner-medium"></span></div> </div>  <div id="atwl-inline" class="a-section a-spacing-none a-hidden"> <div class="a-row a-text-ellipsis"> <div id="atwl-inline-sucess-msg" class="a-box a-alert-inline a-alert-inline-success"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert"></i><div class="a-alert-content"> <span class="a-size-base">    Added to   </span> </div></div></div> <a id="atwl-inline-link" class="a-link-normal"> <span id="atwl-inline-link-text" class="a-size-base"> </span> </a> </div> </div>  <div id="atwl-inline-error" class="a-section a-hidden"> <div class="a-box a-alert-inline a-alert-inline-error"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert"></i><div class="a-alert-content"> <span id="atwl-inline-error-msg" class="a-size-base">    Unable to add item to Wish List. Please try again.   </span> </div></div></div> </div> <div id="atwl-dd-spinner-holder" class="a-section a-hidden"> <div class="a-row a-dropdown"> <div class="a-section a-popover-wrapper"> <div class="a-section a-text-center a-popover-inner"> <div class="a-box a-popover-loading"><div class="a-box-inner"> </div></div> </div> </div> </div> </div> <div id="atwl-dd-error-holder" class="a-section a-hidden"> <div class="a-section a-dropdown"> <div class="a-section a-popover-wrapper"> <div class="a-section a-spacing-base a-padding-base a-text-left a-popover-inner"> <h3 class="a-color-error"> Sorry, there was a problem. </h3> <span> There was an error retrieving your wish lists. Please try again. </span> </div> </div> </div> </div> <div id="atwl-dd-unavail-holder" class="a-section a-hidden"> <div class="a-section a-dropdown"> <div class="a-section a-popover-wrapper"> <div class="a-section a-spacing-base a-padding-base a-text-left a-popover-inner"> <h3 class="a-color-error"> Sorry, there was a problem. </h3> <span> List unavailable. </span> </div> </div> </div> </div> </div>        <form>
++    <!-- sp:csrf --><!-- sp:end-csrf -->
++</form>
++<form>
++    <!-- sp:csrf --><!-- sp:end-csrf -->
++</form>
++   <style>
++    .registry-button-width {
++        width: 100%;
++        margin-left: ;
++        margin-right: ;
++    }
++
++    .add-to-baby-button-spacing-bottom {
++        margin-bottom: 0;
++    }
++</style>                                </div>
++                                      <div id="addToRegistry_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                      <div id="digitalDashLowProminence_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                              </div>
++           </div> </div></div> </div>  </form>
++ </div> </div>
++                                                                                                    </div> </div>                  <div class="dp-cif aok-hidden"></div>
++    </div>                            </div>
++                                               
++<div id="apex_desktop" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                              <div>
++                                                                                                                                                                                                  <div>
++                                        <div id="lowestPriceDevices_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                <div id="dealBadge_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                 <span class="dealBadge aok-relative">
++               <span id="deals_countdown_timer_from_hours_screen_reader_label" class="aok-hidden">Limited-time deal NO_OF_HOURS hours NO_OF_MINUTES minutes</span> <span id="deals_countdown_timer_from_minutes_without_seconds_screen_reader_label" class="aok-hidden">Limited-time deal NO_OF_MINUTES minutes</span> <span id="deals_countdown_timer_from_minutes_with_seconds_screen_reader_label" class="aok-hidden">Limited-time deal NO_OF_MINUTES minutes NO_OF_SECONDS seconds</span> <span id="deals_countdown_timer_from_seconds_screen_reader_label" class="aok-hidden">Limited-time deal NO_OF_SECONDS seconds</span> <span id="dealBadgeSupportingText" class="a-size-small dealBadgeTextColor a-text-bold"> <span>Limited-time deal</span> </span> </span>
++      <style>
++        .dealBadgeSupportingText {
++            color:#CC0C39;
++        }
++    </style>
++                                 </div>
++                                <div id="delightPricingBadge_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                              <style>
++.delight-pricing-badge {
++	background-color: #B12704 !important;
++	margin: auto;
++	font-family: "Amazon Ember", Arial, sans-serif;
++	padding-left: 10px;
++	padding-right: 10px;
++	font-size: 12px !important;
++	line-height: 24px !important;
++	max-width: 140px;
++}
++
++.delight-pricing-badge-label {
++	position: relative;
++	z-index: 1;
++	float: left;
++}
++
++.delight-pricing-badge-label-text {
++	color: #ffffff !important;
++}
++
++.delight-pricing-container span {
++	display: inline-block;
++	vertical-align: middle;
++}
++
++.delight-pricing-container {
++	padding-bottom: 5px;
++}
++
++.delight-pricing-badge-description-text {
++	padding-left: 10px;
++	margin: auto;
++	font-family: "Amazon Ember", Arial, sans-serif;
++	color: #111;
++}
++
++.reinventDelightPricing {
++    color:#CC0C39 !important;
++}
++
++.delightPricingBadge {
++    background-color: #CC0C39!important;
++    padding:4px 8px 4px 8px;
++    border-radius: 4px;
++    display: inline-block;
++    vertical-align: middle;
++    margin-bottom: 4px;
++}
++
++</style>
++
++<!-- considering updating DetailPageDelightPricingTests package whenever you change the template view -->
++                                </div>
++                                <div id="inemi_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                 </div>
++                                <div id="corePriceDisplay_desktop_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                      <style>
++    .ppu-align-bottom,
++    .stp-ppu-adaptive-container {
++        display: inline-flex;
++        flex-direction: row;
++        align-items: flex-end;
++        margin-top: 0.8rem;
++    }
++    .stp-ppu-adaptive-container .pricePerUnit {
++        margin-left: 6px;
++    }
++    /* Override the font of a size small with parent container, currently set to a size-mini.
++       This is necessary as basisPrice is hardcoded to use a size small */
++    .stp-ppu-adaptive-container .a-size-small.basisPrice {
++        font-size: inherit !important;
++        line-height: inherit !important;
++    }
++    .stp-ppu-adaptive-container .a-size-micro.basisPriceLegalMessage {
++        margin-left: 2px;
++    }
++</style>
++
++                                                                                                <style>
++    .savingPriceOverride {
++        color: var(--deal-savings-color, #CC0C39)!important;
++        font-weight: 300!important;
++    }
++    .savingPriceOverrideEdlp {
++        color:#565959!important;
++        font-weight: 300!important;
++    }
++    .savingPriceOverrideEdlpExperiment {
++        color:#CC0C39!important;
++        font-weight: 700!important;
++    }
++    .savingPriceOverrideEdlpExperimentV2T2 {
++        color:#565959!important;
++        font-weight: 300!important;
++    }
++    .savingPriceOverrideEdlpExperimentV2T4 {
++        color:#000000!important;
++        font-weight: 700!important;
++    }
++</style>
++
++      <style>
++        #corePriceDisplay_desktop_feature_div,
++        #apex_offerDisplay_desktop,
++        #corePriceDisplay_mobile_feature_div,
++        #apex_offerDisplay_mobile {
++            --deal-savings-color: #CC0C39;
++        }
++    </style>
++                                                                  <div class="a-section apex-core-price-identifier">                                                        <div class="a-section a-spacing-none aok-align-center aok-relative">     <span id="apex-pricetopay-accessibility-label" class="aok-offscreen"> $89.99 with 25 percent savings </span>        <span class="apex-savings-container ">
++                                    <span class="a-size-large a-color-price savingPriceOverride aok-align-center reinventPriceSavingsPercentageMargin savingsPercentage apex-savings-percentage">-25%</span> </span>
++                                           <span class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay apex-pricetopay-value"><span class="a-offscreen"> </span><span><span class="a-price-symbol">$</span><span class="a-price-whole">89<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span></span></span>              <span id="taxInclusiveMessage" class="a-size-mini a-color-base aok-align-center aok-nowrap">  </span>                       <div class="a-section a-spacing-none aok-relative aok-inline-block">          </div>     </div>                         <div class="a-section a-spacing-small aok-align-center">    <span>     <span class="apex-basisprice-feature"> <span class="aok-relative"><span class="a-size-small aok-offscreen apex-basisprice-offscreen-label">Was: $119.96</span><span class="a-size-small a-color-secondary aok-align-center basisPrice"><span class="apex-basisprice-label">Was:</span>         <span class="a-price a-text-price apex-basisprice-value"><span class="a-offscreen">$119.96</span><span>$119.96</span></span>     </span></span>   <span class="a-size-small aok-align-center basisPriceLegalMessage apex-basisprice-legal-message-icon">                        </span>   </span>             </span>      </div>  </div>                                        </div>
++                                <div id="oneTimePaymentPrice_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                  </div>
++                                <div id="paymentOptions_PriceblockMessaging_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                           <!--
++TurboCheckout maintains an exclusion list of elements containing checkboxes (https://tiny.amazon.com/10fqaob7u/codeamazpackTurbblobfcfasrc).
++When any of these checkbox is marked as selected, turbo checkout is suppressed and customer goes through regular SPC flow.
++Element below will be added to exclusion list mentioned above, and payment-options-checkbox will be marked as selected
++when UFO offer is selected to ensure turbo checkout experience is suppressed anf customer goes through regular SPC flow
++on clicking buy now.
++-->
++<div id="payment-options-feature" class="a-section aok-hidden"></div><div id="price-block-container-0" class="a-section price-block-container"><div id="price-block-error-icon" class="a-box a-alert-inline a-alert-inline-error price-block-icon aok-hidden"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert"></i><div class="a-alert-content"></div></div></div><div id="price-block-text" class="a-section price-block-text"><span id="price-block-error-message" class="price-block-error-message aok-hidden"><span id="price-block-error-string" class="price-block-error-string"></span></span></div></div>                               </div>
++                                <div id="customPriceMerchandisedMessagingDevices_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                <div id="mapleAdvertisement_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                                                                                  </div>
++                                <div id="inemi_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                </div>
++                                <div id="taxInclusiveMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                <div id="delightPricingBadge_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                           <!-- leaving comment so that file does not delete and we are not blocked until themis feature deletion. Will remove this once themis feature is cleaned. -->                               </div>
++                                <div id="omnibusPrice_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                <div id="jewelryPriceBreakup_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                       </div>
++                                <div id="agsIfdInsidePrice_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                      <!-- For LightningDeal use case, agsShippingAndIfdInsideBuyBox is only configured on regular offer, so set defaultPageContext as buyingPrice -->
++                                 </div>
++                                <div id="regulatoryDeposit_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                    </div>
++                                <div id="deliveryPriceBadging_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                         </div>
++                                <div id="freeShippingPriceBadging_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                 <span class="a-size-base"></span>                                 </div>
++                                <div id="freeReturns_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="almTaxExclusivePrice_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="installmentPaymentPrice_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="amazonDevicesCustomPriceMessaging_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="bundleLTBSSavings_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="volumeAwarePricingTableLoader_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                    </div>
++                                <div id="promoMessagingDiscountValue_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                       </div>
++                                <div id="vatMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                        </div>
++                                <div id="inemi_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                    </div>
++                                <div id="points_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                           </div>
++                                <div id="pep_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                  </div>
++                                <div id="vos_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                </div>
++                                <div id="almPrimeSavings_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="reinvent_price_tabular_desktop" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                               <table class="a-normal a-spacing-none reInventPriceTable">    </table> <style>
++    .reInventPriceTable{
++        width: auto;
++    }
++</style>                          </div>
++                                <div id="rebates_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                <div id="volumeAwarePricingPriceBlockMessaging_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                <div id="agsBadgeInsidePrice_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                            </div>
++                                <div id="superSaverBadge_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                                                                             </div>
++                                <div id="tradeInPriceBlock_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                <div id="quantityPricingTableSummaryInPriceBlock_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                             </div>
++                                <div id="exportsTaxMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                               </div>
++                                <div id="amazonGlobal_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                           </div>
++                                <div id="targetedPromoDevices_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                          </div>
++                                <div id="promoPriceBlockMessage_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                 <div>
++                                                                                                                                                                       <!--ocf0-->   <span class="promoPriceBlockMessage">
++              <!--cc-->                                <div>
++                                                    <span>               <label id="greenBadgepctch2716871744089575">Offer</label>              <span id="promoMessagepctch2716871744089575">  90 days free of Amazon Music with purchase   <span class="a-declarative"> <span class="instrumentationElement"> <a>Terms</a> </span> </span> <style> [data-selector="cxcwPopoverLink"] { padding-left: 6px; padding-right: 6px; } </style>  </span>  </span>        </div>
++         </span>
++          </div>                               </div>
++                                <div id="qbpTierTable_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">
++                                                                    </div>
++         </div>
++                                             </div>                          </div>
++                                  
++<img src="https://m.media-amazon.com/images/I/61YULkQowXL._AC_SY300_SX300_QL70_ML2_.jpg" data-old-hires="https://m.media-amazon.com/images/I/61YULkQowXL._AC_SL1500_.jpg" class="a-dynamic-image media-block-image-tag" id="landingImage">
++<script>var data = {"parentAsin": "B0BNG5YS3V", "dimensionToAsinMap": {"0": "B0BGJTLFN5", "1": "B0BGJT87N2"}, "dimensions": ["size_name"], "dimensionValuesDisplayData": {"B0BGJTLFN5": ["Naga V2 Pro"], "B0BGJT87N2": ["Naga V2 HyperSpeed"]}, "num_total_variations": 2};</script>
++<script>/* Reduced ImageBlockATF gallery from the same capture. */ var imageData = {"asin": "B0BGJT87N2", "colorImages": {"initial": [{"hiRes": "https://m.media-amazon.com/images/I/61YULkQowXL._AC_SL1500_.jpg"}, {"hiRes": "https://m.media-amazon.com/images/I/61pl5xLez7L._AC_SL1500_.jpg"}, {"hiRes": "https://m.media-amazon.com/images/I/61Pch16IuTL._AC_SL1500_.jpg"}, {"hiRes": "https://m.media-amazon.com/images/I/81kKJDzgVrL._AC_SL1500_.jpg"}, {"hiRes": "https://m.media-amazon.com/images/I/61sFLe9lmXL._AC_SL1500_.jpg"}, {"hiRes": "https://m.media-amazon.com/images/I/71GYopTZEWL._AC_SL1500_.jpg"}, {"hiRes": "https://m.media-amazon.com/images/I/61o3awCWG8L._AC_SL1500_.jpg"}]}};</script>
+diff --git a/apps/worker/test/unit/parsing/parsers/deals.test.ts b/apps/worker/test/unit/parsing/parsers/deals.test.ts
+new file mode 100644
+index 0000000..6890ecd
+--- /dev/null
++++ b/apps/worker/test/unit/parsing/parsers/deals.test.ts
+@@ -0,0 +1,171 @@
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import {
++  parseAmazonProduct,
++  parseBestBuyProduct,
++  type PageDocument,
++} from '../../../../src/parsing/parsers/index.ts';
++import { jsonLdStrategy } from '../../../../src/parsing/parsers/parser.ts';
++import { countdownEnd, countdownMs } from '../../../../src/parsing/parsers/shared/facts.ts';
++import { assignedJson, htmlDocument } from '../../../../src/parsing/parsers/shared/html.ts';
++import { dealEnd } from '../../../../src/database/capture.repository.ts';
++
++const fixture = (name: string) =>
++  readFileSync(new URL(`../../../fixtures/retailers/${name}.html`, import.meta.url), 'utf8');
++const capturedAt = '2026-10-10T20:00:00.000Z';
++const page = (url: string, html: string, extra: Partial<PageDocument> = {}): PageDocument => ({
++  version: '1',
++  url,
++  requestedUrl: url,
++  fetchedAt: capturedAt,
++  markdown: '',
++  jsonLd: [],
++  metadata: {},
++  html,
++  ...extra,
++});
++const razer = 'https://www.amazon.ca/dp/B0BGJT87N2';
++const deal = (html: string, extra: Partial<PageDocument> = {}) => {
++  const result = parseAmazonProduct(page(razer, html, extra));
++  assert.equal(result.status, 'parsed', result.issues.join('; '));
++  return result.products[0].offers[0].promotions?.find((p) => p.type === 'deal');
++};
++
++test('relative countdowns become a time left; a days-only one is too coarse to keep', () => {
++  assert.equal(countdownMs('Ends in 5h 12m'), (5 * 60 + 12) * 60_000);
++  assert.equal(countdownMs('Limited-time deal 5 hours 12 minutes'), (5 * 60 + 12) * 60_000);
++  assert.equal(countdownMs('Ends in 05:12:33'), ((5 * 60 + 12) * 60 + 33) * 1000);
++  assert.equal(countdownMs('1 day 3 hrs'), 27 * 3_600_000);
++  assert.equal(countdownMs('Ends in 2 days'), undefined);
++  assert.equal(countdownMs('Limited-time deal NO_OF_HOURS hours NO_OF_MINUTES minutes'), undefined);
++  assert.equal(countdownMs('Limited-time deal'), undefined);
++  // The end is the capture time plus the time shown, not the time we parse it.
++  assert.equal(countdownEnd('Ends in 5h 12m', capturedAt), '2026-10-11T01:12:00.000Z');
++  assert.equal(countdownEnd('Ends in 5h 12m', undefined), undefined);
++});
++
++test('a real Amazon limited-time deal badge without a running countdown has no end', () => {
++  // Live capture (reduced): the countdown labels are still the page's unfilled templates.
++  const found = deal(fixture('amazon-deal-B0BGJT87N2'));
++  assert.deepEqual(found && { ...found, evidence: undefined }, {
++    type: 'deal',
++    text: 'Limited-time deal',
++    kind: 'limited_time',
++    evidence: undefined,
++  });
++});
++
++test('a filled Amazon countdown gives an estimated end from the capture time', () => {
++  const html = fixture('amazon-deal-B0BGJT87N2').replace(
++    'Limited-time deal NO_OF_HOURS hours NO_OF_MINUTES minutes',
++    'Limited-time deal 5 hours 12 minutes',
++  );
++  const found = deal(html);
++  assert.equal(found?.text, 'Limited-time deal');
++  assert.equal(found?.validUntil, '2026-10-11T01:12:00.000Z');
++  assert.equal(found?.validUntilEstimated, true);
++  // A later capture of the same page counts from its own time.
++  assert.equal(
++    deal(html, { fetchedAt: '2026-10-10T21:00:00.000Z' })?.validUntil,
++    '2026-10-11T02:12:00.000Z',
++  );
++});
++
++test('a Lightning Deal with a visible timer and its claimed share', () => {
++  const html = fixture('amazon-deal-B0BGJT87N2')
++    .replace(
++      '<span>Limited-time deal</span>',
++      '<span>Lightning Deal</span> <span>Ends in 01:30:00</span>',
++    )
++    // The real page holds an empty deal-progress container; a running Lightning Deal fills it.
++    .replace(
++      '<div id="dealProgress_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2">',
++      '<div id="dealProgress_feature_div" class="celwidget" data-csa-c-asin="B0BGJT87N2"><span>57% claimed</span>',
++    );
++  const found = deal(html);
++  assert.equal(found?.text, 'Lightning Deal');
++  assert.equal(found?.kind, 'lightning');
++  assert.equal(found?.claimedPercent, 57);
++  assert.equal(found?.validUntil, '2026-10-10T21:30:00.000Z');
++});
++
++test("Amazon's delivery cut-off countdown is never read as a deal end", () => {
++  // Real capture: "Order within 3 hrs 58 mins" for delivery, and no deal badge.
++  const result = parseAmazonProduct(
++    page('https://www.amazon.ca/dp/B0FF3549YB', fixture('amazon-single-B0FF3549YB')),
++  );
++  assert.equal(result.status, 'parsed');
++  assert.equal(result.products[0].offers[0].promotions, undefined);
++});
++
++test('Best Buy saleEndDate is an exact end; a hidden end is not kept', () => {
++  const url = 'https://www.bestbuy.ca/en-ca/product/19190432';
++  const state = assignedJson(
++    htmlDocument(fixture('bestbuy-iphone16e-19190432')),
++    '__INITIAL_STATE__',
++  ) as {
++    product: { product: Record<string, unknown> };
++  };
++  const sale = (extra: Record<string, unknown>) => {
++    Object.assign(state.product.product, { isOnSale: true, salePrice: 799.99, ...extra });
++    const html = `<script>window.__INITIAL_STATE__ = ${JSON.stringify(state)};</script>`;
++    return parseBestBuyProduct(page(url, html)).products[0].offers[0].promotions?.[0];
++  };
++  const exact = sale({ saleEndDate: Date.parse('2026-10-13T06:59:00Z') });
++  assert.equal(exact?.validUntil, '2026-10-13T06:59:00.000Z');
++  assert.equal(exact?.validUntilEstimated, undefined);
++  assert.equal(sale({ hideSaleEndDate: true })?.validUntil, undefined);
++});
++
++test('JSON-LD: a sale price valid through an instant ends then; priceValidUntil alone is not a deal', () => {
++  const url = 'https://shop.example/products/kettle';
++  const offer = (extra: object) => ({
++    '@type': 'Offer',
++    priceCurrency: 'CAD',
++    priceSpecification: [
++      { '@type': 'UnitPriceSpecification', price: 59.99, priceCurrency: 'CAD', ...extra },
++      {
++        '@type': 'UnitPriceSpecification',
++        priceType: 'https://schema.org/StrikethroughPrice',
++        price: 79.99,
++      },
++    ],
++    priceValidUntil: '2027-12-31',
++  });
++  const promotions = (extra: object) =>
++    jsonLdStrategy.parse(
++      page(url, '', {
++        jsonLd: [{ '@type': 'Product', name: 'Kettle', url, offers: offer(extra) }],
++      }),
++    ).products[0].offers[0].promotions;
++  assert.deepEqual(
++    promotions({ validThrough: '2026-10-12T23:59:00-07:00' })?.map((p) => [p.type, p.validUntil]),
++    [['sale', '2026-10-13T06:59:00.000Z']],
++  );
++  assert.equal(promotions({}), undefined);
++  // A bare date has no zone to count down to.
++  assert.equal(promotions({ validThrough: '2026-10-12' }), undefined);
++});
++
++test('the stored deal end is the soonest one, and says whether it was estimated', () => {
++  const base = { amountMinor: 1, currency: 'CAD', currencyEvidence: 'e', evidence: 'e' };
++  assert.deepEqual(dealEnd(base), {});
++  assert.deepEqual(
++    dealEnd({
++      ...base,
++      promotions: [
++        { type: 'sale', text: 'Sale', validUntil: '2026-10-13T06:59:00.000Z', evidence: 'e' },
++        {
++          type: 'deal',
++          text: 'Lightning Deal',
++          validUntil: '2026-10-10T21:30:00.000Z',
++          validUntilEstimated: true,
++          evidence: 'e',
++        },
++        { type: 'coupon', text: 'Save 5%', evidence: 'e' },
++      ],
++    }),
++    { dealEndsAt: new Date('2026-10-10T21:30:00.000Z'), dealEndsEstimated: true },
++  );
++});

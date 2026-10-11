@@ -1,0 +1,1 @@
+{"version":1,"locale":"en-CA","acquisition":{"mode":"interactive","browser":"remote_chrome","model":"openai/gpt-4.1-mini","timeoutMs":30000,"actions":[{"type":"act","instruction":"Expand the product specifications if they are collapsed."}]},"fallback":[]}

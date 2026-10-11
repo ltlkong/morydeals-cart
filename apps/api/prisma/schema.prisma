@@ -1,0 +1,103 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Merchant {
+  id           String   @id
+  name         String
+  homeUrl      String
+  logoObjectId String?  @map("logo_object_id")
+  domains      String[]
+  enabled      Boolean  @default(true)
+  sortOrder    Int      @default(0)
+
+  @@map("merchants")
+}
+
+model StorageObject {
+  id              String   @id @db.Uuid
+  provider        String
+  key             String   @unique
+  purpose         String
+  contentType     String   @map("content_type")
+  sizeBytes       BigInt   @map("size_bytes")
+  ownerId         String?  @map("owner_id")
+  visibility      String
+  status          String
+  uploadExpiresAt DateTime @map("upload_expires_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, uploadExpiresAt])
+  @@map("storage_objects")
+}
+
+/// A device's anonymous identity; only the SHA-256 of its bearer token is kept. Later linked to a signed-in account.
+model AnonymousUser {
+  id        String       @id @db.Uuid
+  tokenHash String       @unique @map("token_hash")
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  cartItems CartItem[]
+  viewed    ViewedItem[]
+  lists     ShoppingList[]
+
+  @@map("anonymous_users")
+}
+
+/// A user's named list of saved products, separate from the cart.
+model ShoppingList {
+  id        String             @id @default(uuid()) @db.Uuid
+  userId    String             @map("user_id") @db.Uuid
+  name      String
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user      AnonymousUser      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     ShoppingListItem[]
+
+  @@index([userId, createdAt])
+  @@map("shopping_lists")
+}
+
+/// A product in a list, keyed by its normalized product URL.
+model ShoppingListItem {
+  listId     String       @map("list_id") @db.Uuid
+  productUrl String       @map("product_url")
+  addedAt    DateTime     @default(now()) @map("added_at") @db.Timestamptz(6)
+  list       ShoppingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@id([listId, productUrl])
+  @@index([listId, addedAt])
+  @@map("shopping_list_items")
+}
+
+/// A product in a user's cart, keyed by its normalized product URL (the worker's product identity).
+model CartItem {
+  userId     String        @map("user_id") @db.Uuid
+  productUrl String        @map("product_url")
+  addedAt    DateTime      @default(now()) @map("added_at") @db.Timestamptz(6)
+  user       AnonymousUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, productUrl])
+  @@index([userId, addedAt])
+  @@map("cart_items")
+}
+
+/// A product page this device opened (found by automatic visits); kept apart from the cart.
+model ViewedItem {
+  userId     String        @map("user_id") @db.Uuid
+  productUrl String        @map("product_url")
+  viewedAt   DateTime      @default(now()) @map("viewed_at") @db.Timestamptz(6)
+  user       AnonymousUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, productUrl])
+  @@index([userId, viewedAt])
+  @@map("viewed_items")
+}

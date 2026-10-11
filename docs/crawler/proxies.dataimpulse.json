@@ -1,0 +1,16 @@
+[
+  {
+    "id": "dataimpulse-ca-rotating",
+    "urlsEnv": "DATAIMPULSE_CA_ROTATING_URLS",
+    "maxSessions": 4,
+    "maxSessionUses": 1,
+    "maxSessionAgeSecs": 600
+  },
+  {
+    "id": "dataimpulse-ca-sticky",
+    "urlsEnv": "DATAIMPULSE_CA_STICKY_URLS",
+    "maxSessions": 4,
+    "maxSessionUses": 50,
+    "maxSessionAgeSecs": 600
+  }
+]

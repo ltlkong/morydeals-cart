@@ -1,0 +1,324 @@
+{
+  "taskId": "d0cf844d-6b13-4fbc-b7d0-176e5efc7f94",
+  "attemptId": "c1fe2598-db82-4330-b387-dfe51826c710",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.bestbuy.ca/f0280bdc892cf9fd/d0cf844d-6b13-4fbc-b7d0-176e5efc7f94--c1fe2598-db82-4330-b387-dfe51826c710",
+  "parsed": {
+    "parserVersion": "3.19.0",
+    "strategy": "bestbuy-ca",
+    "status": "parsed",
+    "products": [
+      {
+        "url": "https://www.bestbuy.ca/en-ca/product/17158465",
+        "title": "Frigidaire 24\" 54dB Front-Control Max Dry Dishwasher ENERGY STAR (FDPC4314AS) - Stainless Steel",
+        "sku": "17158465",
+        "variant": {
+          "id": "17158465",
+          "label": "Stainless Steel",
+          "options": [
+            {
+              "name": "Colour",
+              "value": "Stainless Steel"
+            }
+          ],
+          "evidence": "window.__INITIAL_STATE__.product.product.productVariants"
+        },
+        "rating": {
+          "value": 4.56,
+          "scale": 5,
+          "count": 2094,
+          "evidence": "window.__INITIAL_STATE__.product.product.customerRating"
+        },
+        "brand": "FRIGIDAIRE",
+        "specifications": [
+          {
+            "name": "Model Number",
+            "value": "FDPC4314AS"
+          },
+          {
+            "name": "Product Condition",
+            "value": "Brand New"
+          },
+          {
+            "name": "ENERGY STAR certified",
+            "value": "Yes"
+          },
+          {
+            "name": "Dishwasher Type",
+            "value": "Built-In Standard"
+          },
+          {
+            "name": "Type",
+            "value": "Dishwasher"
+          },
+          {
+            "name": "Colour Family",
+            "value": "Stainless Steel"
+          },
+          {
+            "name": "Colour",
+            "value": "Stainless Steel"
+          },
+          {
+            "name": "Child Lock",
+            "value": "No"
+          },
+          {
+            "name": "Status Indicator Lights",
+            "value": "Rinse Aid Indicator"
+          },
+          {
+            "name": "Interior Finish",
+            "value": "Plastic - Midnight Ink"
+          },
+          {
+            "name": "Handle Type",
+            "value": "Pocket Handle"
+          },
+          {
+            "name": "Auto Temp Control",
+            "value": "Yes"
+          },
+          {
+            "name": "Hard Food Disposer",
+            "value": "Yes"
+          },
+          {
+            "name": "Heated Dry",
+            "value": "Yes"
+          },
+          {
+            "name": "Silence Rating",
+            "value": "54 dB"
+          },
+          {
+            "name": "Number of Place Settings",
+            "value": "14"
+          },
+          {
+            "name": "Third Rack",
+            "value": "No"
+          },
+          {
+            "name": "Lower Rack Type",
+            "value": "Standard"
+          },
+          {
+            "name": "Rack Material",
+            "value": "PVC"
+          },
+          {
+            "name": "Stem Holders",
+            "value": "No"
+          },
+          {
+            "name": "Pots and Pans",
+            "value": "Yes"
+          },
+          {
+            "name": "Extra Rinse",
+            "value": "No"
+          },
+          {
+            "name": "Delay Start Options",
+            "value": "4 Hours"
+          },
+          {
+            "name": "Works with Google Assistant",
+            "value": "No"
+          },
+          {
+            "name": "Works with Amazon Alexa",
+            "value": "No"
+          },
+          {
+            "name": "App Enabled",
+            "value": "No"
+          },
+          {
+            "name": "Voice Control",
+            "value": "No"
+          },
+          {
+            "name": "Wi-Fi Connectivity",
+            "value": "No"
+          },
+          {
+            "name": "Width (Inches)",
+            "value": "24 in"
+          },
+          {
+            "name": "Height (Inches)",
+            "value": "33.5 in"
+          },
+          {
+            "name": "Depth (Inches)",
+            "value": "25 in"
+          },
+          {
+            "name": "Width",
+            "value": "60.96 cm"
+          },
+          {
+            "name": "Height",
+            "value": "85.09 cm"
+          },
+          {
+            "name": "Depth",
+            "value": "63.5 cm"
+          },
+          {
+            "name": "Weight",
+            "value": "25.4 kg"
+          },
+          {
+            "name": "Drying Options",
+            "value": "Air Dry, Dry - Heat, Dry - Max, Heated Dry"
+          },
+          {
+            "name": "What's Included",
+            "value": "Manual"
+          }
+        ],
+        "categories": [
+          "Appliances",
+          "Major Appliances",
+          "Dishwashers",
+          "Built-In Dishwashers"
+        ],
+        "description": "What you need to knowBuilt-in standard dishwasher designed for family kitchens and busy householdsTriple spray arms provide thorough cleaning on every loadQuiet 54 dB rating blends into daily life without disruptive noiseMaxDry option delivers enhanced drying results and reduces towel dryingCleaning PerformanceTriple spray arms give your dishes a more effective clean and better water coverageDishSense Sensor Technology adjusts cleaning based on the soil level of your dishes60-minute wash cycle quickly cleans your dishesPots and Pans cycle handles tough, heavily soiled cookwareDrying PerformanceMaxDry raises the temperature for better drying results, reducing towel dryingHeated dry option boosts drying performance for better drying resultsEase of Use and FlexibilityStay-put door allows you to open the door at any angle for easy loading or unloadingDelay start option lets you set the dishwasher to run on your scheduleSanitizationNSF-Certified sanitize option removes 99.9% of common household bacteriaEnergy & EfficiencyENERGY STAR certified for efficient energy useDimensionsWidth: 60.96 cm (24\")Height: 85.09 cm (33.5\")Depth: 63.5 cm (25\")This description was generated by AI and reviewed for accuracy.",
+        "images": [
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/171/17158/17158465.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/171/17158/17158465_1.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/171/17158/17158465_2.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/171/17158/17158465_3.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/171/17158/17158465_4.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/171/17158/17158465_5.jpg",
+          "https://multimedia.bbycastatic.ca/multimedia/products/500x500/171/17158/17158465_6.jpg"
+        ],
+        "evidence": "window.__INITIAL_STATE__.product.product",
+        "offers": [
+          {
+            "amountMinor": 52599,
+            "compareAtAmountMinor": 57999,
+            "compareAtEvidence": "window.__INITIAL_STATE__.product.product.regularPrice",
+            "currency": "CAD",
+            "currencyEvidence": "storefront:bestbuy.ca",
+            "seller": "Best Buy Canada",
+            "condition": "new",
+            "url": "https://www.bestbuy.ca/en-ca/product/17158465",
+            "evidence": "window.__INITIAL_STATE__.product.product.salePrice|priceWithoutEhf|regularPrice",
+            "availability": "InStock",
+            "promotions": [
+              {
+                "type": "sale",
+                "text": "Sale",
+                "validUntil": "2026-10-16T07:00:00.000Z",
+                "evidence": "window.__INITIAL_STATE__.product.product.isOnSale"
+              },
+              {
+                "type": "multi_buy",
+                "text": "Get up to $1,000 off in-cart when you buy 2 or more select major kitchen appliances of the same brand.* Plus, enjoy free local delivery and haul away.",
+                "amountOffMinor": 100000,
+                "promotionId": "10068527",
+                "evidence": "window.__INITIAL_STATE__.product.specialOffers"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "issues": []
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:30:06.800Z",
+        "completedAt": "2026-10-11T01:30:10.640Z",
+        "durationMs": 3839.898,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-2.body"
+      }
+    ],
+    "selectedCapture": 2
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "bestbuy-ca",
+    "evidence": [
+      "url:www.bestbuy.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "browser",
+        "browser": "camoufox",
+        "blockResources": [
+          "image",
+          "media",
+          "font"
+        ],
+        "actions": [],
+        "timeoutMs": 30000,
+        "waitFor": {
+          "minTextLength": 80
+        }
+      },
+      "parsing": {
+        "strategy": "bestbuy-ca"
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 3995.977,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 58.859,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.734,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 3846.416,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 1.864,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 15.035,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 49.785,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 19.835,
+        "status": "completed"
+      }
+    }
+  }
+}

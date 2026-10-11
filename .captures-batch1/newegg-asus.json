@@ -1,0 +1,112 @@
+{
+  "taskId": "8abd5532-505c-487d-b92a-8910ce8caca7",
+  "attemptId": "11f6fca3-f65f-4b68-85bd-dfd0d2d2df36",
+  "status": "needs_review",
+  "auditId": "product-page/2026-10-11/www.newegg.ca/73411637e5cc24cb/8abd5532-505c-487d-b92a-8910ce8caca7--11f6fca3-f65f-4b68-85bd-dfd0d2d2df36",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "llm:anthropic",
+    "status": "needs_review",
+    "products": [],
+    "issues": [
+      "Newegg item price is not corroborated; it may include fees",
+      "No product identified"
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:45:40.365Z",
+        "completedAt": "2026-10-11T01:45:43.032Z",
+        "durationMs": 2667.198,
+        "status": "ready",
+        "reused": false,
+        "captureFile": "response-1.body"
+      }
+    ],
+    "selectedCapture": 1
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "newegg-ca",
+    "evidence": [
+      "url:www.newegg.ca"
+    ],
+    "issues": [],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 60000,
+      "acquisition": {
+        "mode": "browser",
+        "browser": "camoufox",
+        "blockResources": [
+          "image",
+          "media",
+          "font"
+        ],
+        "actions": [],
+        "timeoutMs": 30000,
+        "waitFor": {
+          "minTextLength": 80
+        }
+      },
+      "parsing": {
+        "strategy": "newegg-ca"
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 4644.112,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 82.825,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 0.669,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 2667.976,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 2.37,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 1802.161,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 75.264,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 9.388,
+        "status": "completed"
+      }
+    },
+    "llm": {
+      "promptTokens": 2698,
+      "outputTokens": 8,
+      "requestMs": 1780.923
+    }
+  }
+}

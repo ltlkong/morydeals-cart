@@ -1,0 +1,62 @@
+When using a proxy, it is heavily recommended that you pass `geoip=True`. at file:///Users/tielinli/Workspace/morydeals-cart/node_modules/camoufox-js/dist/warnings.js:21
+{
+  "status": "failed",
+  "auditId": "product-page/2026-10-11/shop.lululemon.com/b21196eef8cd3c10/ce6222ff-f755-48a3-9c0b-217c5424a44d--a61c41cd-7d04-4ed8-9e00-86f7100e867d",
+  "timings": {
+    "scope": "failed",
+    "totalMs": 5944.971,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 58.009,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 2696.815,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 3151.702,
+        "status": "failed"
+      },
+      "archive": {
+        "durationMs": 26.332,
+        "status": "completed"
+      },
+      "databaseFailure": {
+        "durationMs": 5.253,
+        "status": "completed"
+      }
+    }
+  },
+  "reason": "http_error",
+  "acquisition": {
+    "version": 1,
+    "status": "failed",
+    "reason": "http_error",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:45:53.227Z",
+        "completedAt": "2026-10-11T01:45:53.264Z",
+        "durationMs": 37.661,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing",
+        "captureFile": "response-1.body"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:45:53.264Z",
+        "completedAt": "2026-10-11T01:45:56.378Z",
+        "durationMs": 3113.389,
+        "status": "failed",
+        "reason": "http_error",
+        "message": "HTTP 400"
+      }
+    ]
+  },
+  "error": "HTTP 400"
+}

@@ -1,0 +1,849 @@
+diff --git a/apps/mobile/src/ShoppingScreen.tsx b/apps/mobile/src/ShoppingScreen.tsx
+index 6dfeec6..9013dad 100644
+--- a/apps/mobile/src/ShoppingScreen.tsx
++++ b/apps/mobile/src/ShoppingScreen.tsx
+@@ -55,7 +55,12 @@ import { useProducts } from "./use-products";
+ import { useLocalState } from "./use-local-state";
+ import { navigationItems } from "./navigation/navigation-items";
+ import { BrowseScreen } from "./browse/BrowseScreen";
+-import { continueTargets, showIntro, touchRecent } from "./browse/home-state";
++import {
++  openTabs,
++  recentlyViewed,
++  showIntro,
++  touchRecent,
++} from "./browse/home-state";
+ const isBoolean = (value: unknown): value is boolean =>
+   typeof value === "boolean";
+ const tick = () => {
+@@ -103,7 +108,6 @@ export function ShoppingScreen() {
+     [merchants.catalog],
+   );
+   const navigation = useMemo(() => navigationItems(storeLogos), [storeLogos]);
+-  const browseRefresh = useMinimumRefresh(merchants.reload);
+   const {
+     products,
+     status,
+@@ -164,8 +168,9 @@ export function ShoppingScreen() {
+         .catch(() => undefined),
+     [],
+   );
++  // Browse shows Recently viewed, Account the history's count.
+   useEffect(() => {
+-    if (page !== "account" && !historyOpen) return;
++    if (page !== "browse" && page !== "account" && !historyOpen) return;
+     const abort = new AbortController();
+     void reloadHistory(abort.signal);
+     return () => abort.abort();
+@@ -173,6 +178,11 @@ export function ShoppingScreen() {
+   // Pull-to-refresh reloads what the page shows: the store catalog, the server cart, or the history.
+   const cartRefresh = useMinimumRefresh(reloadCart);
+   const historyRefresh = useMinimumRefresh(reloadHistory);
++  const reloadBrowse = useCallback(
++    () => Promise.all([merchants.reload(), reloadHistory()]),
++    [merchants.reload, reloadHistory],
++  );
++  const browseRefresh = useMinimumRefresh(reloadBrowse);
+   // Lists are their own feature, kept on the server per device.
+   const {
+     lists,
+@@ -298,10 +308,14 @@ export function ShoppingScreen() {
+     () => setIntroDismissed(true),
+     [setIntroDismissed],
+   );
+-  const resumable = useMemo(
+-    () => continueTargets(browserSessions, recentStores),
++  const tabs = useMemo(
++    () => openTabs(browserSessions, recentStores),
+     [browserSessions, recentStores],
+   );
++  const shelf = useMemo(
++    () => recentlyViewed(viewed, cartUrls),
++    [viewed, cartUrls],
++  );
+   const firstRun = showIntro({
+     cartReady: ready,
+     cartCount: products.length,
+@@ -398,7 +412,10 @@ export function ShoppingScreen() {
+                   catalogError={merchants.error}
+                   reloadCatalog={merchants.reload}
+                   openStore={openBrowser}
+-                  resumable={resumable}
++                  tabs={tabs}
++                  recentlyViewed={shelf}
++                  openProduct={setDetail}
++                  openHistory={openHistory}
+                   firstRun={firstRun}
+                   dismissIntro={dismissIntro}
+                 />
+diff --git a/apps/mobile/src/browse/BrowseScreen.tsx b/apps/mobile/src/browse/BrowseScreen.tsx
+index 31a1fe5..074c7a9 100644
+--- a/apps/mobile/src/browse/BrowseScreen.tsx
++++ b/apps/mobile/src/browse/BrowseScreen.tsx
+@@ -1,16 +1,14 @@
+ import { memo } from "react";
+ import { StyleSheet, View } from "react-native";
+-import { HOME_SECTIONS, type HomeContext } from "./HomeSections";
++import { liveSections, type HomeContext } from "./HomeSections";
+ 
+-/** The Browse tab: the home page, built from the section registry. Stores only, no products. */
++/** The Browse tab: the home page, built from the section registry. Stores lead; products sit under them. */
+ export const BrowseScreen = memo(function BrowseScreen(context: HomeContext) {
+   return (
+     <View style={s.root}>
+-      {HOME_SECTIONS.filter((section) => section.visible(context)).map(
+-        ({ key, Section }) => (
+-          <Section key={key} {...context} />
+-        ),
+-      )}
++      {liveSections(context).map(({ key, Section }) => (
++        <Section key={key} {...context} />
++      ))}
+     </View>
+   );
+ });
+diff --git a/apps/mobile/src/browse/HomeSections.tsx b/apps/mobile/src/browse/HomeSections.tsx
+index 80c047d..9a7ecac 100644
+--- a/apps/mobile/src/browse/HomeSections.tsx
++++ b/apps/mobile/src/browse/HomeSections.tsx
+@@ -1,6 +1,6 @@
+ import { useState, type ComponentType, type ReactNode } from "react";
+-import { Image, StyleSheet, View } from "react-native";
+-import { X } from "lucide-react-native";
++import { ScrollView, StyleSheet, View } from "react-native";
++import { ChevronRight, X } from "lucide-react-native";
+ import {
+   Copy,
+   MoryAvatar,
+@@ -14,7 +14,9 @@ import {
+   MerchantPicker,
+   type BrowserTarget,
+ } from "../merchants/MerchantPicker";
+-import { storeLabel } from "./home-state";
++import type { MobileProduct } from "../products-api";
++import { Product } from "../cart/Product";
++import { storeTiles } from "./home-state";
+ 
+ /** Everything a Browse section may read; each section picks what it needs. */
+ export type HomeContext = {
+@@ -23,8 +25,12 @@ export type HomeContext = {
+   catalogError: string;
+   reloadCatalog: () => void;
+   openStore: (target: BrowserTarget) => void;
+-  /** Open store tabs to offer again, the most recent first (see continueTargets). */
+-  resumable: readonly BrowserTarget[];
++  /** Open store tabs, the most recent first (see openTabs); their stores lead the grid, marked Continue. */
++  tabs: readonly BrowserTarget[];
++  /** The shopper's recent history, without the products in the cart (see recentlyViewed). */
++  recentlyViewed: readonly MobileProduct[];
++  openProduct: (product: MobileProduct) => void;
++  openHistory: () => void;
+   /** No product yet and the intro not dismissed. */
+   firstRun: boolean;
+   dismissIntro: () => void;
+@@ -32,6 +38,8 @@ export type HomeContext = {
+ 
+ export type HomeSection = {
+   key: string;
++  /** Not built yet: the backend it waits for. A planned section is never shown. */
++  planned?: string;
+   /** Hidden sections render nothing, not even their gap. */
+   visible: (context: HomeContext) => boolean;
+   Section: ComponentType<HomeContext>;
+@@ -78,65 +86,26 @@ function IntroSection({ dismissIntro }: HomeContext) {
+   );
+ }
+ 
+-function StoreMark({ target }: { target: BrowserTarget }) {
+-  return (
+-    <View style={s.mark}>
+-      {target.logoUrl ? (
+-        <Image
+-          accessibilityIgnoresInvertColors
+-          source={{ uri: target.logoUrl }}
+-          resizeMode="contain"
+-          style={s.markImage}
+-        />
+-      ) : (
+-        <Copy weight="extra" style={s.markText}>
+-          {storeLabel(target.name).slice(0, 2).toUpperCase()}
+-        </Copy>
+-      )}
+-    </View>
+-  );
+-}
+-
+-/** The store tabs still open behind Browse, so a round trip lands back on the same page. */
+-function ContinueSection({ resumable, openStore }: HomeContext) {
+-  return (
+-    <View style={s.section}>
+-      <SectionHeader>Continue shopping</SectionHeader>
+-      {resumable.map((target) => (
+-        <Pressable
+-          key={target.url}
+-          accessibilityRole="button"
+-          accessibilityLabel={`Resume ${storeLabel(target.name)}`}
+-          onPress={() => openStore(target)}
+-          style={s.resume}
+-        >
+-          <StoreMark target={target} />
+-          <View style={{ flex: 1 }}>
+-            <Copy weight="extra" numberOfLines={1}>
+-              Continue at {storeLabel(target.name)}
+-            </Copy>
+-            <Copy tone="muted" style={s.caption}>
+-              Open tab
+-            </Copy>
+-          </View>
+-          <Copy weight="extra" tone="accentInk" style={s.caption}>
+-            Resume
+-          </Copy>
+-        </Pressable>
+-      ))}
+-    </View>
+-  );
+-}
+-
+-/** The main content: every store, a search over them, and any other store by link. */
++/** The main content: every store (open ones first, to continue), a search over them, and any other store by link. */
+ function StoresSection({
+   catalog,
+   catalogError,
+   reloadCatalog,
+   openStore,
++  tabs,
++  firstRun,
+   width,
+ }: HomeContext) {
+   const [query, setQuery] = useState("");
++  // Returning shoppers see two rows until they ask for the rest; the first run shows every store.
++  const [expanded, setExpanded] = useState(false);
++  const { tiles, hidden } = storeTiles({
++    merchants: catalog?.merchants ?? [],
++    tabs,
++    query,
++    collapsed: !firstRun && !expanded,
++    allowOthers: !!catalog?.allowOthers,
++  });
+   return (
+     <View style={s.section}>
+       <SectionHeader>All stores</SectionHeader>
+@@ -153,27 +122,102 @@ function StoresSection({
+         error={catalogError}
+         onReload={reloadCatalog}
+         onOpen={openStore}
++        tiles={tiles}
+         query={query}
++        hidden={hidden}
++        onShowAll={() => setExpanded(true)}
+         width={width}
+       />
+     </View>
+   );
+ }
+ 
++const SHELF_CARD = 140;
++
++/** Products the shopper looked at in stores, newest first; a card opens the product's page. */
++function RecentlyViewedSection({
++  recentlyViewed,
++  openProduct,
++  openHistory,
++}: HomeContext) {
++  return (
++    <View style={s.section}>
++      <View style={s.headerRow}>
++        <SectionHeader>Recently viewed</SectionHeader>
++        <Pressable
++          accessibilityRole="button"
++          accessibilityLabel="Open browsing history"
++          hitSlop={8}
++          onPress={openHistory}
++          style={s.link}
++        >
++          <Copy weight="extra" tone="accentInk" style={s.caption}>
++            History
++          </Copy>
++          <ChevronRight size={15} color={colors.accentInk} />
++        </Pressable>
++      </View>
++      <ScrollView
++        horizontal
++        showsHorizontalScrollIndicator={false}
++        contentContainerStyle={s.shelf}
++        style={s.shelfScroll}
++      >
++        {recentlyViewed.map((product) => (
++          <Product
++            key={product.url}
++            product={product}
++            width={SHELF_CARD}
++            onPress={() => openProduct(product)}
++          />
++        ))}
++      </ScrollView>
++    </View>
++  );
++}
++
++/** Waits for its backend; never rendered (`planned` sections are filtered out). */
++const Planned = () => null;
++
+ /**
+- * Browse, top to bottom. Adding a section (e.g. Deals) is one entry here; category chips and per-store coupon
+- * counts wait for the merchants API to carry them.
++ * Browse, top to bottom: stores first, products under them. Adding a section is one entry here; a planned entry
++ * becomes live by dropping `planned` and giving it a Section. Category chips and per-store coupon counts wait for
++ * the API to carry them.
+  */
+ export const HOME_SECTIONS: readonly HomeSection[] = [
+   { key: "intro", visible: (c) => c.firstRun, Section: IntroSection },
++  { key: "stores", visible: () => true, Section: StoresSection },
+   {
+-    key: "continue",
+-    visible: (c) => c.resumable.length > 0,
+-    Section: ContinueSection,
++    key: "recently-viewed",
++    visible: (c) => c.recentlyViewed.length > 0,
++    Section: RecentlyViewedSection,
++  },
++  {
++    key: "price-drops",
++    planned: "GET /catalog/drops (catalog-wide; ?merchant= for your stores)",
++    visible: () => false,
++    Section: Planned,
++  },
++  {
++    key: "popular-at-store",
++    planned: "GET /catalog/popular?merchant= (cart adds across shoppers)",
++    visible: () => false,
++    Section: Planned,
++  },
++  {
++    key: "deals",
++    planned: "Deal posts API",
++    visible: () => false,
++    Section: Planned,
+   },
+-  { key: "stores", visible: () => true, Section: StoresSection },
+ ];
+ 
++/** The sections Browse renders now, in order. */
++export const liveSections = (context: HomeContext) =>
++  HOME_SECTIONS.filter(
++    (section) => !section.planned && section.visible(context),
++  );
++
+ const s = StyleSheet.create({
+   welcome: { gap: 14 },
+   intro: { gap: 2, paddingTop: 4 },
+@@ -198,27 +242,15 @@ const s = StyleSheet.create({
+     justifyContent: "center",
+   },
+   section: { gap: 10 },
+-  sectionTitle: { fontSize: 18, lineHeight: 24 },
+-  resume: {
++  headerRow: {
+     flexDirection: "row",
+     alignItems: "center",
+-    gap: 12,
+-    padding: 12,
+-    borderRadius: radius.md,
+-    backgroundColor: colors.surface,
+-    borderWidth: 1,
+-    borderColor: colors.line,
++    justifyContent: "space-between",
+   },
++  link: { flexDirection: "row", alignItems: "center" },
++  // The shelf runs to the screen edges, past the page's side padding.
++  shelfScroll: { marginHorizontal: -16 },
++  shelf: { gap: 10, paddingHorizontal: 16 },
++  sectionTitle: { fontSize: 18, lineHeight: 24 },
+   caption: { fontSize: 13, lineHeight: 18 },
+-  mark: {
+-    width: 36,
+-    height: 36,
+-    borderRadius: radius.pill,
+-    alignItems: "center",
+-    justifyContent: "center",
+-    backgroundColor: colors.surfaceSunken,
+-    overflow: "hidden",
+-  },
+-  markImage: { width: 28, height: 28 },
+-  markText: { fontSize: 12, color: colors.accentInk },
+ });
+diff --git a/apps/mobile/src/browse/home-state.ts b/apps/mobile/src/browse/home-state.ts
+index 61b053e..5725e30 100644
+--- a/apps/mobile/src/browse/home-state.ts
++++ b/apps/mobile/src/browse/home-state.ts
+@@ -1,9 +1,6 @@
+ import type { Merchant } from "../merchants/merchants-api";
+ import type { BrowserTarget } from "../merchants/MerchantPicker";
+ 
+-/** Continue shopping offers at most this many open store tabs. */
+-export const CONTINUE_LIMIT = 2;
+-
+ /** A store's short name for tiles and rows ("Best Buy Canada" → "Best Buy"). */
+ export const storeLabel = (name: string) => name.replace(/ Canada$/, "");
+ 
+@@ -12,15 +9,14 @@ export function touchRecent(recent: readonly string[], url: string) {
+   return [url, ...recent.filter((item) => item !== url)];
+ }
+ 
+-/** The open store tabs to offer again, the most recently opened first. */
+-export function continueTargets(
++/** The open store tabs, the most recently opened first. */
++export function openTabs(
+   sessions: readonly BrowserTarget[],
+   recent: readonly string[],
+-  limit = CONTINUE_LIMIT,
+ ): BrowserTarget[] {
+-  return recent
+-    .flatMap((url) => sessions.find((target) => target.url === url) ?? [])
+-    .slice(0, limit);
++  return recent.flatMap(
++    (url) => sessions.find((target) => target.url === url) ?? [],
++  );
+ }
+ 
+ /** Stores whose name or domain contains the query; an empty query keeps them all, in catalog order. */
+@@ -51,3 +47,110 @@ export function showIntro({
+ }) {
+   return cartReady && dismissedReady && !dismissed && cartCount === 0;
+ }
++
++/** The catalog store a page belongs to, by its host (the same match as storeFor). */
++export function merchantOf(
++  merchants: readonly Merchant[],
++  url: string,
++): Merchant | undefined {
++  const host = new URL(url).hostname.toLowerCase();
++  return merchants.find((m) =>
++    m.domains.some((domain) => host === domain || host.endsWith(`.${domain}`)),
++  );
++}
++
++/** One cell of the Browse store grid; `resume` cells reopen a tab that is still open. */
++export type StoreTile = {
++  key: string;
++  name: string;
++  logoUrl: string | null;
++  target: BrowserTarget;
++  resume: boolean;
++};
++
++/** The grid's rows while collapsed (returning shoppers); the first run and a search show every store. */
++export const COLLAPSED_ROWS = 2;
++
++/**
++ * The Browse store grid: stores with an open tab first (the most recent first, marked to continue), then the rest in
++ * catalog order, all filtered by the search. Collapsed and not searching, it keeps the first rows (the Other store
++ * cell takes the last place) and says how many stores are left out.
++ */
++export function storeTiles({
++  merchants,
++  tabs,
++  query,
++  collapsed,
++  allowOthers,
++  columns = 3,
++  rows = COLLAPSED_ROWS,
++}: {
++  merchants: readonly Merchant[];
++  /** Open tabs, the most recent first (see openTabs). */
++  tabs: readonly BrowserTarget[];
++  query: string;
++  collapsed: boolean;
++  allowOthers: boolean;
++  columns?: number;
++  rows?: number;
++}): { tiles: StoreTile[]; hidden: number } {
++  const matched = matchStores(merchants, query);
++  const q = query.trim().toLowerCase();
++  const promoted = new Set<string>();
++  const tiles: StoreTile[] = [];
++  for (const tab of tabs) {
++    const merchant = merchantOf(merchants, tab.url);
++    if (merchant) {
++      // A store's most recent tab is the one to continue.
++      if (promoted.has(merchant.id) || !matched.includes(merchant)) continue;
++      promoted.add(merchant.id);
++      tiles.push({
++        key: merchant.id,
++        name: storeLabel(merchant.name),
++        logoUrl: merchant.logoUrl,
++        target: tab,
++        resume: true,
++      });
++      continue;
++    }
++    // A store outside the catalog (opened by link) continues under its host.
++    const host = new URL(tab.url).hostname.replace(/^www\./, "");
++    if (q && !host.toLowerCase().includes(q)) continue;
++    if (tiles.some((tile) => tile.key === host)) continue;
++    tiles.push({
++      key: host,
++      name: host,
++      logoUrl: tab.logoUrl ?? null,
++      target: tab,
++      resume: true,
++    });
++  }
++  for (const m of matched)
++    if (!promoted.has(m.id))
++      tiles.push({
++        key: m.id,
++        name: storeLabel(m.name),
++        logoUrl: m.logoUrl,
++        target: { name: m.name, url: m.homeUrl, logoUrl: m.logoUrl },
++        resume: false,
++      });
++  if (!collapsed || q) return { tiles, hidden: 0 };
++  const room = Math.max(1, columns * rows - (allowOthers ? 1 : 0));
++  return {
++    tiles: tiles.slice(0, room),
++    hidden: Math.max(0, tiles.length - room),
++  };
++}
++
++/** Recently viewed on Browse shows at most this many products. */
++export const RECENTLY_VIEWED_LIMIT = 10;
++
++/** Browse's Recently viewed: the shopper's history without what is already in the cart (the cart shows those). */
++export function recentlyViewed<T extends { url: string }>(
++  history: readonly T[],
++  cartUrls: readonly string[],
++  limit = RECENTLY_VIEWED_LIMIT,
++): T[] {
++  const inCart = new Set(cartUrls);
++  return history.filter((item) => !inCart.has(item.url)).slice(0, limit);
++}
+diff --git a/apps/mobile/src/merchants/MerchantPicker.tsx b/apps/mobile/src/merchants/MerchantPicker.tsx
+index c2f4456..84b83ac 100644
+--- a/apps/mobile/src/merchants/MerchantPicker.tsx
++++ b/apps/mobile/src/merchants/MerchantPicker.tsx
+@@ -11,7 +11,7 @@ import { Link } from "lucide-react-native";
+ import { Button, Copy, Pressable, colors, radius } from "@morydeals/ui";
+ import type { MerchantCatalog } from "./merchants-api";
+ import { productUrl } from "../products-api";
+-import { matchStores, storeLabel } from "../browse/home-state";
++import type { StoreTile } from "../browse/home-state";
+ export type BrowserTarget = {
+   name: string;
+   url: string;
+@@ -19,21 +19,31 @@ export type BrowserTarget = {
+ };
+ const COLUMNS = 3;
+ const GAP = 10;
+-/** The store grid on Browse: three tiles a row, filtered by the store search; the last tile opens any other store. */
++/**
++ * The store grid on Browse: three tiles a row (see storeTiles for which and in what order); stores with an open tab
++ * come first, marked Continue, and reopen it; the last tile opens any other store.
++ */
+ export const MerchantPicker = memo(function MerchantPicker({
+   catalog,
+   error,
+   onReload,
+   onOpen,
++  tiles,
+   query = "",
++  hidden = 0,
++  onShowAll,
+   width,
+ }: {
+   catalog: MerchantCatalog | null;
+   error: string;
+   onReload: () => void;
+   onOpen: (target: BrowserTarget) => void;
+-  /** The store search; matches names and domains. */
++  tiles: readonly StoreTile[];
++  /** The store search, to say when nothing matches. */
+   query?: string;
++  /** Stores left out of the collapsed grid; with `onShowAll`, a button shows them. */
++  hidden?: number;
++  onShowAll?: () => void;
+   /** The grid's width, for three equal tiles a row. */
+   width: number;
+ }) {
+@@ -56,7 +66,6 @@ export const MerchantPicker = memo(function MerchantPicker({
+   };
+   // Floored so rounding never pushes the third tile onto the next row.
+   const tile = { width: Math.floor((width - GAP * (COLUMNS - 1)) / COLUMNS) };
+-  const stores = catalog ? matchStores(catalog.merchants, query) : [];
+   return (
+     <View style={s.root}>
+       {!catalog && !error ? <ActivityIndicator color={colors.accent} /> : null}
+@@ -66,36 +75,43 @@ export const MerchantPicker = memo(function MerchantPicker({
+           <Button onPress={onReload}>Reload stores</Button>
+         </>
+       ) : null}
+-      {catalog && query.trim() && !stores.length ? (
++      {catalog && query.trim() && !tiles.length ? (
+         <Copy tone="muted">No store matches “{query.trim()}”.</Copy>
+       ) : null}
+       <View style={s.stores}>
+-        {stores.map((m) => (
++        {tiles.map((store) => (
+           <Pressable
+-            key={m.id}
++            key={store.key}
+             accessibilityRole="button"
+-            accessibilityLabel={m.name}
+-            onPress={() =>
+-              onOpen({ name: m.name, url: m.homeUrl, logoUrl: m.logoUrl })
++            accessibilityLabel={
++              store.resume ? `Continue at ${store.name}` : store.target.name
+             }
+-            style={[s.tile, tile]}
++            onPress={() => onOpen(store.target)}
++            style={[s.tile, store.resume && s.resumeTile, tile]}
+           >
++            {store.resume ? (
++              <View style={s.resume}>
++                <Copy weight="extra" style={s.resumeText}>
++                  Continue
++                </Copy>
++              </View>
++            ) : null}
+             <View style={s.logo}>
+-              {m.logoUrl ? (
++              {store.logoUrl ? (
+                 <Image
+                   accessibilityIgnoresInvertColors
+-                  source={{ uri: m.logoUrl }}
++                  source={{ uri: store.logoUrl }}
+                   resizeMode="contain"
+                   style={s.logoImage}
+                 />
+               ) : (
+                 <Copy weight="extra" style={s.logoFallback}>
+-                  {storeLabel(m.name).slice(0, 2).toUpperCase()}
++                  {store.name.slice(0, 2).toUpperCase()}
+                 </Copy>
+               )}
+             </View>
+             <Copy weight="extra" numberOfLines={2} style={s.storeName}>
+-              {storeLabel(m.name)}
++              {store.name}
+             </Copy>
+           </Pressable>
+         ))}
+@@ -116,6 +132,11 @@ export const MerchantPicker = memo(function MerchantPicker({
+           </Pressable>
+         ) : null}
+       </View>
++      {hidden > 0 && onShowAll && catalog ? (
++        <Button secondary onPress={onShowAll}>
++          {`See all ${catalog.merchants.length} stores`}
++        </Button>
++      ) : null}
+       {others && catalog?.allowOthers ? (
+         <View style={s.other}>
+           <TextInput
+@@ -153,6 +174,18 @@ const s = StyleSheet.create({
+     padding: 10,
+   },
+   otherTile: { backgroundColor: colors.surfaceAlt },
++  resumeTile: { borderColor: colors.chipLine, borderWidth: 1.5 },
++  // Marks a store whose tab is still open: a press continues there.
++  resume: {
++    position: "absolute",
++    top: 6,
++    left: 6,
++    paddingHorizontal: 7,
++    paddingVertical: 1,
++    borderRadius: radius.pill,
++    backgroundColor: colors.accentSoft,
++  },
++  resumeText: { fontSize: 10, lineHeight: 15, color: colors.accentInk },
+   otherMark: {
+     width: 44,
+     height: 44,
+diff --git a/apps/mobile/test/browse-home.test.ts b/apps/mobile/test/browse-home.test.ts
+index 4f0e46e..a4972c7 100644
+--- a/apps/mobile/test/browse-home.test.ts
++++ b/apps/mobile/test/browse-home.test.ts
+@@ -1,11 +1,14 @@
+ import { test } from "node:test";
+ import assert from "node:assert/strict";
+ import {
+-  CONTINUE_LIMIT,
+-  continueTargets,
++  RECENTLY_VIEWED_LIMIT,
+   matchStores,
++  merchantOf,
++  openTabs,
++  recentlyViewed,
+   showIntro,
+   storeLabel,
++  storeTiles,
+   touchRecent,
+ } from "../src/browse/home-state";
+ import type { Merchant } from "../src/merchants/merchants-api";
+@@ -43,18 +46,160 @@ test("the store search matches names and domains, ignoring case and spaces", ()
+   assert.deepEqual(matchStores(merchants, "canada"), []);
+ });
+ 
+-test("continue shopping offers the most recently opened tabs, at most two", () => {
++test("open tabs come back the most recently opened first", () => {
+   const tabs = merchants.map((m) => ({ name: m.name, url: m.homeUrl }));
+   let recent: string[] = [];
+   for (const tab of tabs) recent = touchRecent(recent, tab.url);
+   // Reopening a tab moves it to the front without duplicating it.
+   recent = touchRecent(recent, tabs[0].url);
+   assert.deepEqual(recent, [tabs[0].url, tabs[2].url, tabs[1].url]);
+-  assert.equal(CONTINUE_LIMIT, 2);
+-  assert.deepEqual(continueTargets(tabs, recent), [tabs[0], tabs[2]]);
+-  // A recent store without an open tab is skipped; no tabs, nothing to resume.
+-  assert.deepEqual(continueTargets([tabs[1]], recent), [tabs[1]]);
+-  assert.deepEqual(continueTargets([], recent), []);
++  assert.deepEqual(openTabs(tabs, recent), [tabs[0], tabs[2], tabs[1]]);
++  // A recent store without an open tab is skipped.
++  assert.deepEqual(openTabs([tabs[1]], recent), [tabs[1]]);
++  assert.deepEqual(openTabs([], recent), []);
++});
++
++const many = [
++  ...merchants,
++  store("Costco Canada", "costco.ca"),
++  store("Canadian Tire", "canadiantire.ca"),
++  store("IKEA Canada", "ikea.com"),
++  store("Simons", "simons.ca"),
++];
++const keys = (r: ReturnType<typeof storeTiles>) =>
++  r.tiles.map((t) => `${t.key}${t.resume ? "*" : ""}`);
++
++test("a page belongs to the store whose domain it is on, subdomains included", () => {
++  assert.equal(
++    merchantOf(many, "https://www.bestbuy.ca/en-ca/product/1")?.id,
++    "bestbuy.ca",
++  );
++  assert.equal(merchantOf(many, "https://sephora.com/")?.id, "sephora.com");
++  assert.equal(merchantOf(many, "https://notbestbuy.ca/"), undefined);
++});
++
++test("stores with an open tab lead the grid, most recent first, and continue that tab", () => {
++  const product = { name: "Sephora", url: "https://www.sephora.com/ca/p/1" };
++  const home = { name: "Best Buy Canada", url: "https://www.bestbuy.ca/" };
++  const older = { name: "Sephora", url: "https://www.sephora.com/" };
++  const result = storeTiles({
++    merchants: many,
++    tabs: [product, home, older],
++    query: "",
++    collapsed: false,
++    allowOthers: true,
++  });
++  assert.deepEqual(keys(result), [
++    "sephora.com*",
++    "bestbuy.ca*",
++    "walmart.ca",
++    "costco.ca",
++    "canadiantire.ca",
++    "ikea.com",
++    "simons.ca",
++  ]);
++  // A store with several tabs continues the most recent one.
++  assert.equal(result.tiles[0].target, product);
++  assert.equal(result.tiles[0].name, "Sephora");
++  // Other stores open their home page.
++  assert.deepEqual(result.tiles[2].target, {
++    name: "Walmart Canada",
++    url: "https://www.walmart.ca/",
++    logoUrl: null,
++  });
++  assert.equal(result.hidden, 0);
++});
++
++test("a tab on a store outside the catalog is promoted under its host", () => {
++  const other = { name: "Other store", url: "https://www.muji.ca/sale" };
++  const result = storeTiles({
++    merchants,
++    tabs: [other],
++    query: "",
++    collapsed: false,
++    allowOthers: true,
++  });
++  assert.deepEqual(keys(result), [
++    "muji.ca*",
++    "bestbuy.ca",
++    "walmart.ca",
++    "sephora.com",
++  ]);
++  assert.equal(result.tiles[0].name, "muji.ca");
++});
++
++test("the search filters every store and keeps matching open stores first", () => {
++  const tabs = [
++    { name: "Canadian Tire", url: "https://www.canadiantire.ca/" },
++    { name: "Sephora", url: "https://www.sephora.com/" },
++  ];
++  const result = storeTiles({
++    merchants: many,
++    tabs,
++    query: "ca",
++    collapsed: true,
++    allowOthers: true,
++  });
++  // Collapsing never hides search results; the open Sephora tab does not match and stays out.
++  assert.deepEqual(keys(result), [
++    "canadiantire.ca*",
++    "bestbuy.ca",
++    "walmart.ca",
++    "costco.ca",
++    "simons.ca",
++  ]);
++  assert.equal(result.hidden, 0);
++});
++
++test("collapsed, the grid keeps two rows with Other store last, promoted stores included", () => {
++  const tabs = [{ name: "IKEA Canada", url: "https://www.ikea.com/ca/" }];
++  const collapsed = storeTiles({
++    merchants: many,
++    tabs,
++    query: "",
++    collapsed: true,
++    allowOthers: true,
++  });
++  assert.deepEqual(keys(collapsed), [
++    "ikea.com*",
++    "bestbuy.ca",
++    "walmart.ca",
++    "sephora.com",
++    "costco.ca",
++  ]);
++  assert.equal(collapsed.hidden, 2);
++  // Without the Other store cell, two full rows.
++  const noOthers = storeTiles({
++    merchants: many,
++    tabs,
++    query: "",
++    collapsed: true,
++    allowOthers: false,
++  });
++  assert.equal(noOthers.tiles.length, 6);
++  assert.equal(noOthers.hidden, 1);
++  // A catalog that fits shows nothing hidden.
++  const small = storeTiles({
++    merchants,
++    tabs: [],
++    query: "",
++    collapsed: true,
++    allowOthers: true,
++  });
++  assert.equal(small.tiles.length, 3);
++  assert.equal(small.hidden, 0);
++});
++
++test("recently viewed leaves out what is in the cart and keeps the newest few", () => {
++  const history = Array.from({ length: 14 }, (_, i) => ({
++    url: `https://www.bestbuy.ca/p/${i}`,
++  }));
++  const shown = recentlyViewed(history, [history[0].url, history[3].url]);
++  assert.equal(shown.length, RECENTLY_VIEWED_LIMIT);
++  assert.equal(shown[0].url, history[1].url);
++  assert.ok(!shown.some((p) => p.url === history[3].url));
++  assert.deepEqual(recentlyViewed([], []), []);
++  assert.deepEqual(recentlyViewed(history.slice(0, 1), [history[0].url]), []);
+ });
+ 
+ test("the intro shows on an empty cart until dismissed, and never before both are loaded", () => {

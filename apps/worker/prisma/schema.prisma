@@ -1,0 +1,158 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model CaptureRun {
+  id              String               @id
+  requestedUrl    String               @map("requested_url")
+  source          String
+  acquisition     String
+  status          String
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt     DateTime?            @map("completed_at") @db.Timestamptz(6)
+  contextSha256   String?              @map("context_sha256")
+  activeAttemptId String?              @map("active_attempt_id")
+  leaseExpiresAt  DateTime?            @map("lease_expires_at") @db.Timestamptz(6)
+  attempts        CaptureAttempt[]
+  observations    ProductObservation[]
+
+  // The API answers revisited pages from the product last captured from them.
+  @@index([requestedUrl], map: "crawler_runs_requested_url_idx")
+  @@map("crawler_runs")
+}
+
+model CaptureAttempt {
+  id            String               @id
+  taskId         String               @map("run_id")
+  auditId       String               @map("audit_id")
+  status        String
+  finalUrl      String?              @map("final_url")
+  parserVersion String?              @map("parser_version")
+  startedAt     DateTime             @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt   DateTime?            @map("completed_at") @db.Timestamptz(6)
+  error         String?
+  run           CaptureRun           @relation(fields: [taskId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  observations  ProductObservation[]
+
+  @@index([taskId], map: "crawler_attempts_run_idx")
+  @@map("crawler_attempts")
+}
+
+model TrackedProduct {
+  id             String               @id
+  url            String
+  identityKey    String               @unique(map: "tracked_products_identity_key") @map("identity_key")
+  sku            String?
+  title          String
+  data           Json
+  /// The selected variant (null: none stated, or captured before variants were read).
+  variantId      String?              @map("variant_id")
+  variantLabel   String?              @map("variant_label")
+  /// The latest published rating; per-capture ratings stay in product_observations.data.
+  ratingValue    Float?               @map("rating_value")
+  ratingScale    Float?               @map("rating_scale")
+  ratingCount    Int?                 @map("rating_count")
+  lastObservedAt DateTime             @map("last_observed_at") @db.Timestamptz(6)
+  observations   ProductObservation[]
+  externalPrices ExternalPricePoint[]
+  historySyncs   ExternalHistorySync[]
+
+  @@index([lastObservedAt(sort: Desc), id(sort: Desc)], map: "tracked_products_catalog_idx")
+  @@map("tracked_products")
+}
+
+model ProductObservation {
+  id         BigInt             @id @default(autoincrement())
+  taskId      String             @map("run_id")
+  attemptId  String             @map("attempt_id")
+  productId  String             @map("product_id")
+  observedAt DateTime           @map("observed_at") @db.Timestamptz(6)
+  data       Json
+  run        CaptureRun         @relation(fields: [taskId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  attempt    CaptureAttempt     @relation(fields: [attemptId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  product    TrackedProduct     @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  prices     PriceObservation[]
+
+  @@index([taskId, productId], map: "product_observations_run_product_idx")
+  @@index([productId, observedAt(sort: Desc)], map: "observations_history_idx")
+  @@map("product_observations")
+}
+
+model PriceObservation {
+  observationId BigInt             @map("observation_id")
+  offerIndex    Int                @map("offer_index")
+  amountMinor          BigInt  @map("amount_minor")
+  compareAtAmountMinor BigInt? @map("compare_at_amount_minor")
+  compareAtEvidence    String? @map("compare_at_evidence")
+  currencyEvidence     String  @map("currency_evidence")
+  currency      String             @db.Char(3)
+  availability  String?
+  /// new | used | renewed | open_box | damaged; null when the source does not say.
+  condition     String?
+  /// Deals shown with this offer: [{type, text, code?, effectiveMinor?, validUntil?, evidence}].
+  promotions    Json?
+  /// The seller the source names for this offer.
+  seller        String?
+  /// one_time | subscription (Amazon Subscribe & Save) | member (Prime member price); null reads as one_time.
+  purchaseType  String?            @default("one_time") @map("purchase_type")
+  /// When this offer's soonest-ending deal ends (null: no deal end shown). The capture time is the observation's.
+  dealEndsAt    DateTime?          @map("deal_ends_at") @db.Timestamptz(6)
+  /// True when dealEndsAt was computed from a relative countdown plus the capture time, not stated by the store.
+  dealEndsEstimated Boolean        @default(false) @map("deal_ends_estimated")
+  /// What the struck reference price is, as labelled ("Was", "List Price", "Typical price").
+  compareAtLabel String?           @map("compare_at_label")
+  /// The savings percent the page states beside the struck price ("-26%"); never computed.
+  savingsPercent Int?              @map("savings_percent")
+  /// Who ships this offer, as stated ("Amazon").
+  shipsFrom     String?            @map("ships_from")
+  /// No longer written (parser 3.18.0): delivery wording is not recorded. Kept nullable so no data is dropped.
+  delivery      String?
+  /// Units left when the page states a count ("Only 3 left in stock").
+  stockQuantity Int?               @map("stock_quantity")
+  /// A fee stated beside the price ("$0.55 eco fee might apply").
+  fee           String?
+  offerUrl      String?            @map("offer_url")
+  evidence      String
+  observation   ProductObservation @relation(fields: [observationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([observationId, offerIndex])
+  @@index([dealEndsAt], map: "price_observations_deal_ends_idx")
+  @@map("price_observations")
+}
+
+/// Price history from a third-party source (e.g. Keepa), kept apart from captured, evidence-backed observations.
+model ExternalPricePoint {
+  productId     String         @map("product_id")
+  source        String
+  series        String
+  observedAt    DateTime       @map("observed_at") @db.Timestamptz(6)
+  /// Null when the series had no price (e.g. no Buy Box / out of stock).
+  amountMinor   BigInt?        @map("amount_minor")
+  shippingMinor BigInt?        @map("shipping_minor")
+  currency      String         @db.Char(3)
+  product       TrackedProduct @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([productId, source, series, observedAt])
+  @@map("external_price_points")
+}
+
+/// When each product's external history was last fetched, for scheduling and diagnosis.
+model ExternalHistorySync {
+  productId    String         @map("product_id")
+  source       String
+  lastSyncedAt DateTime       @map("last_synced_at") @db.Timestamptz(6)
+  lastError    String?        @map("last_error")
+  product      TrackedProduct @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([productId, source])
+  @@index([source, lastSyncedAt])
+  @@map("external_history_syncs")
+}

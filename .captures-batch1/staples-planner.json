@@ -1,0 +1,130 @@
+{
+  "taskId": "906bc4d0-831f-409f-b5be-8c4d811db137",
+  "attemptId": "07d86104-4717-4b51-a73a-eb90f09fdc03",
+  "status": "parsed",
+  "auditId": "product-page/2026-10-11/www.staples.ca/1ccbd502f5efef62/906bc4d0-831f-409f-b5be-8c4d811db137--07d86104-4717-4b51-a73a-eb90f09fdc03",
+  "parsed": {
+    "parserVersion": "3.20.0",
+    "strategy": "shopify",
+    "status": "parsed",
+    "issues": [],
+    "products": [
+      {
+        "url": "https://www.staples.ca/products/3164650-en-moleskine-classic-18-month-2026-2027-weekly-planner-hard-cover-5-x-825-sapphire-blue-english?variant=7022069940353",
+        "title": "Moleskine Classic 18-Month 2026-2027 Weekly Planner - Hard Cover - 5&quot; x 8.25&quot; - Sapphire Blue - English",
+        "variantId": "7022069940353",
+        "brand": "Moleskine",
+        "images": [
+          "https://www.staples.ca/cdn/shop/files/bce9bbc186fc292fe018bba5c470c752e6e4e223_square3164650_1_1000x.jpg?v=1779435044"
+        ],
+        "evidence": "jsonLd.offers[0]",
+        "offers": [
+          {
+            "amountMinor": 3700,
+            "currency": "CAD",
+            "currencyEvidence": "jsonLd.offer.variant:7022069940353",
+            "url": "https://www.staples.ca/products/3164650-en-moleskine-classic-18-month-2026-2027-weekly-planner-hard-cover-5-x-825-sapphire-blue-english?variant=7022069940353",
+            "evidence": "jsonLd.offers[0].price",
+            "availability": "InStock"
+          }
+        ]
+      }
+    ]
+  },
+  "acquisition": {
+    "version": 1,
+    "status": "ready",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:47:04.402Z",
+        "completedAt": "2026-10-11T01:47:04.422Z",
+        "durationMs": 19.559,
+        "status": "ready",
+        "reused": true,
+        "captureFile": "response-2.body"
+      }
+    ],
+    "selectedCapture": 2
+  },
+  "decision": {
+    "version": 1,
+    "policyVersion": "1.0.0",
+    "mode": "auto",
+    "platform": "shopify",
+    "evidence": [
+      "Shopify.shop",
+      "Shopify.locale",
+      "Shopify.currency",
+      "Shopify.country"
+    ],
+    "issues": [
+      "Shopify page does not identify one selected variant"
+    ],
+    "workflow": {
+      "version": 1,
+      "budgetMs": 55329,
+      "acquisition": {
+        "mode": "browser",
+        "browser": "camoufox",
+        "blockResources": [
+          "image",
+          "media",
+          "font"
+        ],
+        "actions": [],
+        "timeoutMs": 30000,
+        "waitFor": {
+          "minTextLength": 80
+        }
+      },
+      "parsing": {
+        "strategy": "shopify"
+      },
+      "fallback": [],
+      "cleaning": {
+        "removeSelectors": [],
+        "scope": "auto"
+      },
+      "audit": {
+        "screenshots": true
+      }
+    }
+  },
+  "timings": {
+    "scope": "completed",
+    "totalMs": 4865.829,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 59.85,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 4681.371,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 20.091,
+        "status": "completed"
+      },
+      "conversion": {
+        "durationMs": 28.423,
+        "status": "completed"
+      },
+      "parsing": {
+        "durationMs": 1.442,
+        "status": "completed"
+      },
+      "archive": {
+        "durationMs": 54.079,
+        "status": "completed"
+      },
+      "databaseWrite": {
+        "durationMs": 17.381,
+        "status": "completed"
+      }
+    }
+  }
+}

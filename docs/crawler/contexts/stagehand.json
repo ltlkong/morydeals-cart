@@ -1,0 +1,1 @@
+{"version":1,"budgetMs":60000,"acquisition":{"mode":"interactive","browser":"chromium","model":"openai/gpt-4.1-mini","timeoutMs":45000,"actions":[{"type":"act","instruction":"Expand the product specifications section"}]},"fallback":[]}

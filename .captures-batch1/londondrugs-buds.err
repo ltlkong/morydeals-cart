@@ -1,0 +1,57 @@
+When using a proxy, it is heavily recommended that you pass `geoip=True`. at file:///Users/tielinli/Workspace/morydeals-cart/node_modules/camoufox-js/dist/warnings.js:21
+{
+  "status": "failed",
+  "auditId": "product-page/2026-10-11/www.londondrugs.com/f9b8d8bc7f498ece/37581930-4ed9-44db-b8e5-96f9bdbe89a3--0212161b-15e0-4e12-ab64-b4c92d17a4d1",
+  "timings": {
+    "scope": "failed",
+    "totalMs": 4074.454,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 56.988,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 3969.847,
+        "status": "failed"
+      },
+      "archive": {
+        "durationMs": 40.643,
+        "status": "completed"
+      },
+      "databaseFailure": {
+        "durationMs": 4.594,
+        "status": "completed"
+      }
+    }
+  },
+  "reason": "http_error",
+  "acquisition": {
+    "version": 1,
+    "status": "failed",
+    "reason": "http_error",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T01:47:10.088Z",
+        "completedAt": "2026-10-11T01:47:10.864Z",
+        "durationMs": 775.72,
+        "status": "failed",
+        "reason": "http_error",
+        "message": "HTTP 404"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T01:47:10.864Z",
+        "completedAt": "2026-10-11T01:47:14.057Z",
+        "durationMs": 3192.861,
+        "status": "failed",
+        "reason": "http_error",
+        "message": "HTTP 404"
+      }
+    ]
+  },
+  "error": "HTTP 404"
+}

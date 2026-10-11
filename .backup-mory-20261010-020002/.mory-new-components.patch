@@ -1,0 +1,1175 @@
+diff -ruN a/apps/mobile/src/account/MoryScreen.tsx b/apps/mobile/src/account/MoryScreen.tsx
+--- a/apps/mobile/src/account/MoryScreen.tsx	2026-10-09 23:53:56.000000000 -0700
++++ b/apps/mobile/src/account/MoryScreen.tsx	2026-10-10 01:27:05.747035546 -0700
+@@ -9,13 +9,16 @@
+   orange: "Orange",
+   apple: "Apple",
+   pear: "Pear",
++  cherry: "Cherries",
++  lemon: "Lemon",
+   none: "Nothing",
+ };
+-const EXPRESSION_LABELS: Record<MoryLook["expression"], string> = {
++const EXPRESSION_LABELS: Record<(typeof EXPRESSIONS)[number], string> = {
+   neutral: "Calm",
+   happy: "Happy",
+   wink: "Wink",
+   sleepy: "Sleepy",
++  starry: "Starry",
+ };
+ 
+ /** Choose what Mory wears on its head and its expression; every Mory in the app follows. */
+@@ -129,9 +132,10 @@
+   },
+   section: { gap: 10 },
+   sectionTitle: { fontSize: 17, lineHeight: 23 },
+-  options: { flexDirection: "row", gap: 8 },
++  options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+   option: {
+-    flex: 1,
++    flexGrow: 1,
++    flexBasis: "30%",
+     alignItems: "center",
+     gap: 4,
+     paddingVertical: 10,
+diff -ruN a/apps/mobile/src/account/mory-look-parts.ts b/apps/mobile/src/account/mory-look-parts.ts
+--- a/apps/mobile/src/account/mory-look-parts.ts	2026-10-09 23:53:20.000000000 -0700
++++ b/apps/mobile/src/account/mory-look-parts.ts	2026-10-10 01:27:05.747035546 -0700
+@@ -1,7 +1,21 @@
+ import type { MoryLook } from "@morydeals/ui";
+ 
+-export const HEADPIECES = ["orange", "apple", "pear", "none"] as const;
+-export const EXPRESSIONS = ["neutral", "happy", "wink", "sleepy"] as const;
++export const HEADPIECES = [
++  "orange",
++  "apple",
++  "pear",
++  "cherry",
++  "lemon",
++  "none",
++] as const;
++/** What a shopper may wear every day; `worried` is left to scenes (errors, no results). */
++export const EXPRESSIONS = [
++  "neutral",
++  "happy",
++  "wink",
++  "sleepy",
++  "starry",
++] as const;
+ 
+ /** A saved look from storage (untrusted): only known parts. */
+ export const validMoryLook = (value: unknown): value is MoryLook => {
+diff -ruN a/apps/mobile/test/mory-look.test.ts b/apps/mobile/test/mory-look.test.ts
+--- a/apps/mobile/test/mory-look.test.ts	2026-10-09 23:54:05.000000000 -0700
++++ b/apps/mobile/test/mory-look.test.ts	2026-10-10 01:27:05.747035546 -0700
+@@ -8,11 +8,21 @@
+     validMoryLook({ headpiece: "none", expression: "neutral" }),
+     true,
+   );
++  assert.equal(
++    validMoryLook({ headpiece: "cherry", expression: "starry" }),
++    true,
++  );
++  assert.equal(
++    validMoryLook({ headpiece: "lemon", expression: "happy" }),
++    true,
++  );
+   for (const value of [
+     null,
+     {},
+     { headpiece: "banana", expression: "wink" },
+     { headpiece: "pear", expression: 3 },
++    // A scene-only expression is never a saved everyday look.
++    { headpiece: "pear", expression: "worried" },
+     "pear",
+   ])
+     assert.equal(validMoryLook(value), false, JSON.stringify(value));
+diff -ruN a/apps/ui-showcase/src/MoryPlayground.tsx b/apps/ui-showcase/src/MoryPlayground.tsx
+--- a/apps/ui-showcase/src/MoryPlayground.tsx	2026-10-08 22:36:11.000000000 -0700
++++ b/apps/ui-showcase/src/MoryPlayground.tsx	2026-10-10 01:27:12.875035546 -0700
+@@ -1,12 +1,21 @@
+ import { useRef, useState } from 'react';
+ import { View, Switch, TextInput } from 'react-native';
+ import { ReduceMotion, useSharedValue, withTiming } from 'react-native-reanimated';
+-import { Mory, MorySilhouette, DealTag, MORY_POSES, Button, Copy, colors, fonts, type MoryPose, type MoryHolding, type MoryHeadpiece, type MoryExpression, type MoryHandMotion } from '@morydeals/ui';
++import { Mory, MorySilhouette, MoryAvatar, MoryState, MORY_AVATAR_SIZES, DealTag, MORY_POSES, Button, Copy, colors, fonts, type MoryPose, type MoryHolding, type MoryHeadpiece, type MoryExpression, type MoryHandMotion, type MoryAvatarSize, type MoryStateKind } from '@morydeals/ui';
+ import { Heading, Panel, Options, CodeBlock } from './blocks';
+ 
+-const fruits: MoryHeadpiece[] = ['orange', 'apple', 'pear', 'none'];
+-const expressions: MoryExpression[] = ['neutral', 'happy', 'wink', 'sleepy'];
+-const props: MoryHolding[] = ['none', 'card', 'camera', 'heart', 'tag', 'deals', 'sign', 'keyboard', 'box', 'plug'];
++const fruits: MoryHeadpiece[] = ['orange', 'apple', 'pear', 'cherry', 'lemon', 'none'];
++const expressions: MoryExpression[] = ['neutral', 'happy', 'wink', 'sleepy', 'starry', 'worried'];
++const props: MoryHolding[] = ['none', 'card', 'camera', 'heart', 'tag', 'deals', 'sign', 'keyboard', 'box', 'plug', 'bell', 'drop', 'bag', 'magnifier'];
++const stateKinds: MoryStateKind[] = ['empty-cart', 'price-drop', 'loading', 'no-results', 'error', 'alert-set'];
++const stateCopy: Record<MoryStateKind, { title: string; message: string }> = {
++  'empty-cart': { title: 'Your cart is empty', message: 'Paste a link and Mory will watch its price.' },
++  'price-drop': { title: 'Price dropped!', message: 'Sample: now $329.99, was $399.99.' },
++  loading: { title: 'Looking for deals…', message: 'Checking prices and coupons.' },
++  'no-results': { title: 'Nothing found', message: 'Try another store or a shorter name.' },
++  error: { title: 'Something went wrong', message: 'Check your connection and try again.' },
++  'alert-set': { title: 'Alert set', message: "Mory will ring when the price drops." },
++};
+ const hands: MoryHandMotion[] = ['hold', 'wave', 'tap'];
+ export function MoryPlayground({ wide }: { wide: boolean }) {
+   const [pose, setPose] = useState<MoryPose>('mascot');
+@@ -25,13 +34,15 @@
+   const [typingText, setTypingText] = useState('');
+   const strokes = useSharedValue(0);
+   const strokeCount = useRef(0);
+-  function choosePose(next: MoryPose) { setPose(next); setHolding(MORY_POSES[next].holding); setHandMotion(next === 'wave' ? 'wave' : next === 'type' ? 'tap' : 'hold'); }
++  function choosePose(next: MoryPose) { setPose(next); if (next === 'drop') setSign('-18%'); else if (next === 'welcome') setSign('Hello!'); setHolding(MORY_POSES[next].holding); setHandMotion(next === 'wave' ? 'wave' : next === 'type' ? 'tap' : 'hold'); }
+   return <View style={{ gap: 20 }}><Heading title="Meet Mory. Make it yours." description="Original Mory artwork, separated into composable parts. Fruit, held object, expression and hand motion can change independently." />
+     <View style={{ flexDirection: wide ? 'row' : 'column', gap: 18 }}>
+       <Panel title="Live character" caption="SVG + Reanimated" style={{ flex: 1 }}><View style={{ backgroundColor: colors.surfaceAlt, borderRadius: 16, height: 290, justifyContent: 'center', alignItems: 'center' }}><Mory key={entry} pose={pose} holding={holding} headpiece={fruit} expression={expression} size={260} live still={!animated} sign={sign} keystrokes={followTyping && holding === 'keyboard' ? strokes : undefined} dropIn={entry > 0} showEffects={effects} motion={{ hands: handMotion, body: bob ? 'bob' : 'still', eyes: blink ? 'blink' : 'still', headpiece: sway ? 'sway' : 'still' }} /></View><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Copy weight="bold">Animation</Copy><Switch accessibilityLabel="Play Mory animation" value={animated} onValueChange={setAnimated} trackColor={{ false: colors.lineStrong, true: colors.accent }} /></View><Button secondary disabled={!animated} onPress={() => setEntry(e => e + 1)}>Replay entrance</Button><CodeBlock>{`<Mory\n  pose="${pose}" size={260}\n  holding="${holding}" headpiece="${fruit}"\n  expression="${expression}"\n  motion={{ hands: '${handMotion}',\n    body: '${bob ? 'bob' : 'still'}', eyes: '${blink ? 'blink' : 'still'}',\n    headpiece: '${sway ? 'sway' : 'still'}' }}\n  showEffects={${effects}} still={${!animated}}\n/>`}</CodeBlock></Panel>
+-      <Panel title="Character controls" caption="Independent layers" style={{ flex: 1 }}><Options label="Head fruit" value={fruit} options={fruits} onChange={setFruit} /><Options label="Holding" value={holding} options={props} onChange={setHolding} /><Options label="Hands" value={handMotion} options={hands} onChange={setHandMotion} /><Options label="Expression" value={expression} options={expressions} onChange={setExpression} />{holding === 'sign' && <TextInput accessibilityLabel="Mory sign text" value={sign} onChangeText={setSign} maxLength={18} style={{ padding: 12, backgroundColor: colors.surfaceAlt, borderRadius: 10, fontFamily: fonts.bold, color: colors.ink }} />}{holding === 'keyboard' && <View style={{ gap: 8 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Copy style={{ fontSize: 13 }}>Follow your typing</Copy><Switch accessibilityLabel="Mory follows typing" value={followTyping} onValueChange={next => { setFollowTyping(next); if (next) setHandMotion('tap'); }} trackColor={{ false: colors.lineStrong, true: colors.accent }} /></View>{followTyping && <TextInput accessibilityLabel="Type with Mory" value={typingText} onChangeText={text => { setTypingText(text); strokes.set(withTiming(++strokeCount.current, { duration: 300, reduceMotion: ReduceMotion.System })); }} placeholder="Type and watch Mory's hands…" style={{ padding: 12, backgroundColor: colors.surfaceAlt, borderRadius: 10, fontFamily: fonts.regular, color: colors.ink }} />}</View>}{[{ label: 'Body bob', value: bob, change: setBob }, { label: 'Eye blink', value: blink, change: setBlink }, { label: 'Fruit sway', value: sway, change: setSway }, { label: 'Decorative effects', value: effects, change: setEffects }].map(item => <View key={item.label} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Copy style={{ fontSize: 13 }}>{item.label}</Copy><Switch accessibilityLabel={item.label} value={item.value} onValueChange={item.change} trackColor={{ false: colors.lineStrong, true: colors.accent }} /></View>)}</Panel>
++      <Panel title="Character controls" caption="Independent layers" style={{ flex: 1 }}><Options label="Head fruit" value={fruit} options={fruits} onChange={setFruit} /><Options label="Holding" value={holding} options={props} onChange={setHolding} /><Options label="Hands" value={handMotion} options={hands} onChange={setHandMotion} /><Options label="Expression" value={expression} options={expressions} onChange={setExpression} />{(holding === 'sign' || holding === 'drop') && <TextInput accessibilityLabel="Mory sign text" value={sign} onChangeText={setSign} maxLength={18} style={{ padding: 12, backgroundColor: colors.surfaceAlt, borderRadius: 10, fontFamily: fonts.bold, color: colors.ink }} />}{holding === 'keyboard' && <View style={{ gap: 8 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Copy style={{ fontSize: 13 }}>Follow your typing</Copy><Switch accessibilityLabel="Mory follows typing" value={followTyping} onValueChange={next => { setFollowTyping(next); if (next) setHandMotion('tap'); }} trackColor={{ false: colors.lineStrong, true: colors.accent }} /></View>{followTyping && <TextInput accessibilityLabel="Type with Mory" value={typingText} onChangeText={text => { setTypingText(text); strokes.set(withTiming(++strokeCount.current, { duration: 300, reduceMotion: ReduceMotion.System })); }} placeholder="Type and watch Mory's hands…" style={{ padding: 12, backgroundColor: colors.surfaceAlt, borderRadius: 10, fontFamily: fonts.regular, color: colors.ink }} />}</View>}{[{ label: 'Body bob', value: bob, change: setBob }, { label: 'Eye blink', value: blink, change: setBlink }, { label: 'Fruit sway', value: sway, change: setSway }, { label: 'Decorative effects', value: effects, change: setEffects }].map(item => <View key={item.label} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Copy style={{ fontSize: 13 }}>{item.label}</Copy><Switch accessibilityLabel={item.label} value={item.value} onValueChange={item.change} trackColor={{ false: colors.lineStrong, true: colors.accent }} /></View>)}</Panel>
+     </View>
+     <Panel title="Pose presets" caption="Keep the familiar personality"><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>{(Object.keys(MORY_POSES) as MoryPose[]).map(item => <View key={item} style={{ width: 102, alignItems: 'center', gap: 6, padding: 6, borderRadius: 14, backgroundColor: pose === item ? colors.accentSoft : colors.background }}><Mory pose={item} size={88} still /><Button secondary style={{ minHeight: 34, paddingHorizontal: 9, paddingVertical: 5 }} onPress={() => choosePose(item)}>{item}</Button></View>)}</View></Panel>
++    <Panel title="Moments" caption="MoryState presets"><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>{stateKinds.map(kind => <View key={kind} style={{ width: wide ? 200 : '100%', padding: 8, borderRadius: 14, backgroundColor: colors.background }}><MoryState kind={kind} size={120} still amount={kind === 'price-drop' ? '-18%' : undefined} {...stateCopy[kind]} /></View>)}</View><View style={{ padding: 12, borderRadius: 14, backgroundColor: colors.successSoft }}><MoryState kind="price-drop" layout="inline" amount="-18%" title="WH-1000XM5 dropped 18%" message="Sample price drop banner." /></View><CodeBlock>{'<MoryState kind="price-drop" amount="-18%"\n  title="Price dropped!" message={detail}\n  action={<Button onPress={buy}>Buy now</Button>} />'}</CodeBlock></Panel>
++    <Panel title="Avatars" caption="Still, cropped, follows the shopper's look"><View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 14 }}>{(Object.keys(MORY_AVATAR_SIZES) as MoryAvatarSize[]).map(item => <View key={item} style={{ alignItems: 'center', gap: 4 }}><MoryAvatar size={item} headpiece={fruit} expression={expression} /><Copy tone="muted" style={{ fontSize: 11 }}>{item} · {MORY_AVATAR_SIZES[item]}</Copy></View>)}<View style={{ alignItems: 'center', gap: 4 }}><MoryAvatar size="lg" tone="plain" headpiece={fruit} expression={expression} /><Copy tone="muted" style={{ fontSize: 11 }}>plain</Copy></View></View></Panel>
+     <Panel title="Brand details" caption="Shared theme artwork"><View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 18 }}><MorySilhouette size={80} /><MorySilhouette size={80} face={1} /><DealTag width={125} height={61} /></View><Copy tone="muted" style={{ fontSize: 12 }}>Reduce Motion is respected. Pose galleries stay still; only the live preview owns a looping clock.</Copy></Panel>
+   </View>;
+ }
+diff -ruN a/packages/ui/src/feedback/MoryState.tsx b/packages/ui/src/feedback/MoryState.tsx
+--- a/packages/ui/src/feedback/MoryState.tsx	1969-12-31 16:00:00.000000000 -0800
++++ b/packages/ui/src/feedback/MoryState.tsx	2026-10-10 01:26:34.591035546 -0700
+@@ -0,0 +1,105 @@
++import type { ReactNode } from "react";
++import { StyleSheet, View } from "react-native";
++
++import { Copy } from "../content/Copy";
++import { Mory } from "../mory/Mory";
++import type { MoryProps } from "../mory/types";
++
++/** The moments a screen hands to Mory instead of a blank page or a bare spinner. */
++export type MoryStateKind =
++  | "empty-cart"
++  | "price-drop"
++  | "loading"
++  | "no-results"
++  | "error"
++  | "alert-set";
++
++/**
++ * Which Mory plays each moment. A scene sets the expression only where the moment needs one; otherwise
++ * the shopper's chosen look shows through.
++ */
++export const MORY_STATE_SCENES: Record<
++  MoryStateKind,
++  Pick<MoryProps, "pose" | "expression">
++> = {
++  "empty-cart": { pose: "empty" },
++  "price-drop": { pose: "drop", expression: "starry" },
++  loading: { pose: "search" },
++  "no-results": { pose: "search", expression: "worried" },
++  error: { pose: "offline", expression: "worried" },
++  "alert-set": { pose: "alert", expression: "happy" },
++};
++
++/**
++ * Mory with a title, an optional message and an optional action (a Button the host supplies): empty
++ * cart, a price drop, loading, no results, a failure, or an alert just set. `stack` centres it for a
++ * whole screen or sheet; `inline` puts a small Mory beside the words for a banner inside a list.
++ * Labels and the amount (shown on the price-drop card, e.g. "-18%") are presentation values from the host.
++ */
++export function MoryState({
++  kind,
++  title,
++  message,
++  action,
++  amount,
++  layout = "stack",
++  size,
++  still,
++}: {
++  kind: MoryStateKind;
++  title: string;
++  message?: string;
++  action?: ReactNode;
++  amount?: string;
++  layout?: "stack" | "inline";
++  size?: number;
++  still?: boolean;
++}) {
++  const inline = layout === "inline";
++  const loading = kind === "loading";
++  return (
++    <View
++      style={inline ? s.inline : s.stack}
++      accessibilityRole={loading ? "progressbar" : undefined}
++      accessibilityState={loading ? { busy: true } : undefined}
++      accessibilityLiveRegion={
++        loading || kind === "price-drop" ? "polite" : undefined
++      }
++    >
++      <Mory
++        {...MORY_STATE_SCENES[kind]}
++        size={size ?? (inline ? 64 : 150)}
++        sign={amount}
++        still={still}
++        showEffects={!inline}
++      />
++      <View style={inline ? s.inlineWords : s.words}>
++        <Copy
++          weight="extra"
++          style={[s.title, inline && s.inlineTitle]}
++          accessibilityRole="header"
++        >
++          {title}
++        </Copy>
++        {message ? (
++          <Copy tone="muted" style={[s.message, inline && s.inlineMessage]}>
++            {message}
++          </Copy>
++        ) : null}
++      </View>
++      {action ? <View style={inline ? null : s.action}>{action}</View> : null}
++    </View>
++  );
++}
++
++const s = StyleSheet.create({
++  stack: { alignItems: "center", gap: 6, paddingVertical: 16 },
++  words: { alignItems: "center", gap: 4, maxWidth: 300 },
++  title: { fontSize: 18, lineHeight: 24, textAlign: "center" },
++  message: { fontSize: 14, lineHeight: 20, textAlign: "center" },
++  action: { marginTop: 10 },
++  inline: { flexDirection: "row", alignItems: "center", gap: 12 },
++  inlineWords: { flex: 1, gap: 2 },
++  inlineTitle: { fontSize: 15, lineHeight: 20, textAlign: "left" },
++  inlineMessage: { fontSize: 13, lineHeight: 18, textAlign: "left" },
++});
+diff -ruN a/packages/ui/src/index.ts b/packages/ui/src/index.ts
+--- a/packages/ui/src/index.ts	2026-10-09 23:52:52.000000000 -0700
++++ b/packages/ui/src/index.ts	2026-10-10 01:26:40.331035546 -0700
+@@ -14,6 +14,11 @@
+ export * from "./inputs/SearchField";
+ export { Wordmark } from "./content/Wordmark";
+ export * from "./feedback/Badge";
++export {
++  MoryState,
++  MORY_STATE_SCENES,
++  type MoryStateKind,
++} from "./feedback/MoryState";
+ 
+ // Overlays and commerce
+ export * from "./overlays/Sheet";
+@@ -65,6 +70,11 @@
+ export { MorySilhouette, SILHOUETTE_FACES } from "./mory/MorySilhouette";
+ export { MotionPause } from "./mory/motion-pause";
+ export { DealTag } from "./mory/DealTag";
++export {
++  MoryAvatar,
++  MORY_AVATAR_SIZES,
++  type MoryAvatarSize,
++} from "./mory/MoryAvatar";
+ export { BrandSparkles } from "./content/BrandSparkles";
+ export type {
+   MoryProps,
+diff -ruN a/packages/ui/src/mory/Mory.tsx b/packages/ui/src/mory/Mory.tsx
+--- a/packages/ui/src/mory/Mory.tsx	2026-10-09 23:52:47.000000000 -0700
++++ b/packages/ui/src/mory/Mory.tsx	2026-10-10 01:31:19.523035546 -0700
+@@ -1,7 +1,13 @@
+ import { StyleSheet, View } from "react-native";
+ import Animated, { type SharedValue } from "react-native-reanimated";
+ import { BrandSparkles } from "../content/BrandSparkles";
+-import { Flash, RisingHeart, Sparkle } from "./effects";
++import {
++  Flash,
++  RingLines,
++  RisingHeart,
++  Sparkle,
++  ThinkingDots,
++} from "./effects";
+ import { EDGE_LINE } from "./held";
+ import { MoryFigure } from "./MoryFigure";
+ import { resolveMory, type MoryConfiguration } from "./poses";
+@@ -67,6 +73,39 @@
+         />
+       </>
+     );
++  if (config.holding === "bell")
++    return (
++      <RingLines
++        clock={clock}
++        at={{ x: 0.5, y: 1 - FIGURE + FIGURE * 0.72 }}
++        size={size * 0.8}
++      />
++    );
++  if (config.holding === "drop")
++    return (
++      <>
++        <Sparkle clock={clock} at={{ x: 0.8, y: 0.14 }} size={size * 0.16} />
++        <Sparkle
++          clock={clock}
++          at={{ x: 0.06, y: 0.36 }}
++          size={size * 0.11}
++          phase={0.45}
++        />
++      </>
++    );
++  if (config.holding === "magnifier")
++    return (
++      <ThinkingDots clock={clock} at={{ x: 0.7, y: 0.12 }} size={size * 0.26} />
++    );
++  if (config.holding === "bag")
++    return (
++      <View
++        pointerEvents="none"
++        style={{ position: "absolute", left: size * 0.74, top: size * 0.12 }}
++      >
++        <BrandSparkles size={size * 0.2} />
++      </View>
++    );
+   if (["mascot", "wave", "welcome"].includes(config.pose))
+     return (
+       <View
+diff -ruN a/packages/ui/src/mory/MoryAvatar.tsx b/packages/ui/src/mory/MoryAvatar.tsx
+--- a/packages/ui/src/mory/MoryAvatar.tsx	1969-12-31 16:00:00.000000000 -0800
++++ b/packages/ui/src/mory/MoryAvatar.tsx	2026-10-10 01:31:30.955035546 -0700
+@@ -0,0 +1,87 @@
++import { useId } from "react";
++import { View } from "react-native";
++import Svg, { Circle, ClipPath, Defs, G } from "react-native-svg";
++
++import { MORY_COLORS } from "../theme/mory";
++import { colors } from "../theme/tokens";
++import { useMoryLook } from "./look";
++import { moryStrokeAt } from "./MoryFigure";
++import { MoryBodyPart as Body } from "./parts/body";
++import { MoryExpressionPart as Eyes } from "./parts/face";
++import { MoryHeadpiecePart as Headpiece } from "./parts/headpiece";
++import type { MoryExpression, MoryHeadpiece } from "./types";
++
++/** Avatar sizes: chat bubbles and list rows (xs, sm), headers and cards (md), account (lg). */
++export const MORY_AVATAR_SIZES = { xs: 24, sm: 32, md: 48, lg: 64 } as const;
++export type MoryAvatarSize = keyof typeof MORY_AVATAR_SIZES;
++
++/** The part of the 200-grid the avatar shows: the fruit, the face and the top of the body. */
++const CROP = { x: 20, y: 22, side: 160 };
++/** The disc behind Mory; the body is cut to it, the fruit pops out above it like a sticker. */
++const CENTER = { x: 100, y: 116 };
++const DISC = 66;
++
++/**
++ * Mory's head and shoulders in a circle, always one still SVG: the cheap way to put Mory beside a message,
++ * in a list row or on a badge. It wears the shopper's look (MoryLookProvider) unless told otherwise.
++ * Decorative unless given an accessibilityLabel.
++ */
++export function MoryAvatar({
++  size = "md",
++  headpiece,
++  expression,
++  tone = "soft",
++  accessibilityLabel,
++}: {
++  size?: MoryAvatarSize | number;
++  headpiece?: MoryHeadpiece;
++  expression?: MoryExpression;
++  /** soft: the accent's pale fill; plain: a white disc with a hairline. */
++  tone?: "soft" | "plain";
++  accessibilityLabel?: string;
++}) {
++  const look = useMoryLook();
++  const px = typeof size === "number" ? size : MORY_AVATAR_SIZES[size];
++  const clipId = `mory-avatar-${useId().replace(/[^a-z0-9_-]/gi, "")}`;
++  // The outline follows the figure's own rule, at the size the whole grid would be drawn.
++  const stroke = moryStrokeAt((px * 200) / CROP.side);
++  const r = DISC;
++  return (
++    <View
++      style={{ width: px, height: px }}
++      accessible={!!accessibilityLabel}
++      accessibilityRole={accessibilityLabel ? "image" : undefined}
++      accessibilityLabel={accessibilityLabel}
++      importantForAccessibility={
++        accessibilityLabel ? "yes" : "no-hide-descendants"
++      }
++      pointerEvents="none"
++    >
++      <Svg
++        width={px}
++        height={px}
++        viewBox={`${CROP.x} ${CROP.y} ${CROP.side} ${CROP.side}`}
++      >
++        <Defs>
++          <ClipPath id={clipId}>
++            <Circle cx={CENTER.x} cy={CENTER.y} r={r} />
++          </ClipPath>
++        </Defs>
++        <Circle
++          cx={CENTER.x}
++          cy={CENTER.y}
++          r={r}
++          fill={tone === "soft" ? colors.accentSoft : MORY_COLORS.body}
++          stroke={tone === "soft" ? colors.chipLine : colors.lineStrong}
++          strokeWidth={stroke * 0.5}
++        />
++        {/* The fruit first, as on the figure: its base tucks behind the head. */}
++        <Headpiece kind={headpiece ?? look.headpiece} stroke={stroke} />
++        <G clipPath={`url(#${clipId})`}>
++          <Body stroke={stroke} />
++          <Eyes expression={expression ?? look.expression} />
++        </G>
++      </Svg>
++    </View>
++  );
++}
+diff -ruN a/packages/ui/src/mory/MoryFigure.tsx b/packages/ui/src/mory/MoryFigure.tsx
+--- a/packages/ui/src/mory/MoryFigure.tsx	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/mory/MoryFigure.tsx	2026-10-10 01:32:58.231035546 -0700
+@@ -10,6 +10,7 @@
+ import { MORY_COLORS } from "../theme/mory";
+ 
+ import {
++  carriesWords,
+   EDGE_LINE,
+   HANDS,
+   Held,
+@@ -17,7 +18,16 @@
+   SignWords,
+   type MoryHolding,
+ } from "./held";
+-import { blinkAt, bobAt, glanceAt, leafAngle, waveAngle } from "./motion";
++import {
++  blinkAt,
++  bobAt,
++  glanceAt,
++  heldAngle,
++  hopAt,
++  leafAngle,
++  ringAngle,
++  waveAngle,
++} from "./motion";
+ import { strikeAt, keyLightAt } from "./motion/hands";
+ import { MoryBodyPart as Body, MoryShadowPart as Shadow } from "./parts/body";
+ import { MoryHandPart as Hand } from "./parts/hands";
+@@ -31,6 +41,9 @@
+ /** The outline on the grid; small figures get a heavier one so it still reads as a line. */
+ const STROKE = 6;
+ const THIN_BELOW = 64;
++/** The outline width on the grid for a figure `size` wide. */
++export const moryStrokeAt = (size: number) =>
++  STROKE * Math.max(1, THIN_BELOW / size);
+ 
+ type Props = {
+   size: number;
+@@ -48,7 +61,7 @@
+   orangeLift?: SharedValue<number>;
+   /** Mory's own soft shadow; off when the caller draws a ground shadow (useDropIn). */
+   shadow?: boolean;
+-  /** What a sign in Mory's hands says. */
++  /** What a sign (or a price-drop card) in Mory's hands says. */
+   words?: string;
+   /**
+    * Keystrokes, for the keyboard: each whole step of this value presses one hand, left then right — the
+@@ -138,6 +151,22 @@
+     }
+     if (holding === "deals")
+       return { transform: [{ translateY: -2 * (size / 200) * bobAt(t) }] };
++    // The bell rings in a burst at the start of each turn, then hangs still.
++    if (holding === "bell")
++      return { transform: [{ rotate: `${ringAngle(t)}deg` }] };
++    // The drop card hops twice, as if to say "look!".
++    if (holding === "drop")
++      return { transform: [{ translateY: -6 * (size / 200) * hopAt(t) }] };
++    if (holding === "bag")
++      return { transform: [{ rotate: `${heldAngle(t) * 0.6}deg` }] };
++    // The magnifier sweeps a small circle, looking things over.
++    if (holding === "magnifier")
++      return {
++        transform: [
++          { translateX: 5 * (size / 200) * Math.sin(t * Math.PI * 2) },
++          { translateY: 3 * (size / 200) * Math.cos(t * Math.PI * 2) },
++        ],
++      };
+     if (holding === "heart") {
+       return {
+         transform: [
+@@ -190,7 +219,7 @@
+   const inHands = (
+     <>
+       <Layer style={[origins[holding], held]}>
+-        <Held holding={holding} stroke={stroke} />
++        <Held holding={holding} stroke={stroke} labelled={!!words} />
+       </Layer>
+       {holding === "keyboard" && handMotion === "tap" ? (
+         <>
+@@ -226,7 +255,13 @@
+           </Layer>
+         </Animated.View>
+       )}
+-      {holding === "sign" ? <SignWords size={size} words={words} /> : null}
++      {carriesWords(holding) ? (
++        <Animated.View
++          style={[StyleSheet.absoluteFill, origins[holding], held]}
++        >
++          <SignWords size={size} words={words} holding={holding} />
++        </Animated.View>
++      ) : null}
+     </>
+   );
+ 
+@@ -301,7 +336,7 @@
+   keystrokes,
+ }: Props) {
+   const clipId = `mory-edge-${useId().replace(/[^a-z0-9_-]/gi, "")}`;
+-  const stroke = STROKE * Math.max(1, THIN_BELOW / size);
++  const stroke = moryStrokeAt(size);
+   if (clock) {
+     return (
+       <LiveFigure
+@@ -348,16 +383,16 @@
+         <Body stroke={stroke} />
+         <Eyes expression={expression} />
+       </G>
+-      <Held holding={holding} stroke={stroke} />
++      <Held holding={holding} stroke={stroke} labelled={!!words} />
+       <Hand at={hands.left} stroke={stroke} />
+       <Hand at={hands.right} stroke={stroke} />
+     </Svg>
+   );
+-  if (holding !== "sign") return figure;
++  if (!carriesWords(holding)) return figure;
+   return (
+     <View style={{ width: size, height: size }}>
+       {figure}
+-      <SignWords size={size} words={words} />
++      <SignWords size={size} words={words} holding={holding} />
+     </View>
+   );
+ }
+@@ -381,4 +416,8 @@
+   keyboard: {},
+   box: { transformOrigin: "50% 78%" },
+   plug: { transformOrigin: "50% 78%" },
++  bell: { transformOrigin: "50% 60%" },
++  drop: {},
++  bag: { transformOrigin: "50% 63%" },
++  magnifier: {},
+ });
+diff -ruN a/packages/ui/src/mory/effects.tsx b/packages/ui/src/mory/effects.tsx
+--- a/packages/ui/src/mory/effects.tsx	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/mory/effects.tsx	2026-10-10 01:31:58.995035546 -0700
+@@ -122,6 +122,96 @@
+   );
+ }
+ 
++/** A thought bubble whose three dots light one after another: Mory is looking (loading, searching). */
++export function ThinkingDots({ clock, at, size }: EffectProps) {
++  return (
++    <Animated.View
++      pointerEvents="none"
++      style={[
++        styles.spot,
++        styles.thought,
++        place(at),
++        {
++          width: size,
++          height: size * 0.56,
++          borderRadius: size * 0.28,
++          gap: size * 0.08,
++        },
++      ]}
++    >
++      {[0, 1, 2].map((dot) => (
++        <ThinkingDot key={dot} clock={clock} index={dot} size={size * 0.15} />
++      ))}
++    </Animated.View>
++  );
++}
++function ThinkingDot({
++  clock,
++  index,
++  size,
++}: {
++  clock: SharedValue<number>;
++  index: number;
++  size: number;
++}) {
++  const style = useAnimatedStyle(() => {
++    // Each dot rises and darkens in its own third of every half turn.
++    const t = (clock.get() * 2 - index / 3 + 1) % 1;
++    const lit = interpolate(t, [0, 0.18, 0.36], [0, 1, 0], "clamp");
++    return {
++      opacity: 0.3 + 0.7 * lit,
++      transform: [{ translateY: -size * 0.35 * lit }],
++    };
++  });
++  return (
++    <Animated.View
++      style={[
++        {
++          width: size,
++          height: size,
++          borderRadius: size / 2,
++          backgroundColor: MORY_COLORS.outline,
++        },
++        style,
++      ]}
++    />
++  );
++}
++
++/** Two ring marks either side of a bell, flashing out while it rings (see ringAngle). */
++export function RingLines({ clock, at, size }: EffectProps) {
++  const style = useAnimatedStyle(() => {
++    const t = clock.get();
++    return {
++      opacity: interpolate(t, [0, 0.04, 0.3, 0.38], [0, 1, 1, 0], "clamp"),
++      transform: [
++        { scale: interpolate(t, [0, 0.08, 0.38], [0.7, 1, 1.12], "clamp") },
++      ],
++    };
++  });
++  return (
++    <Animated.View
++      pointerEvents="none"
++      style={[
++        styles.spot,
++        place(at),
++        { marginLeft: -size / 2, marginTop: -size / 2 },
++        style,
++      ]}
++    >
++      <Svg width={size} height={size} viewBox="0 0 100 100">
++        <Path
++          d="M14 30 Q6 50 14 70 M26 38 Q22 50 26 62 M86 30 Q94 50 86 70 M74 38 Q78 50 74 62"
++          fill="none"
++          stroke={MORY_COLORS.orange}
++          strokeWidth={4.5}
++          strokeLinecap="round"
++        />
++      </Svg>
++    </Animated.View>
++  );
++}
++
+ const styles = StyleSheet.create({
+   spot: { position: "absolute" },
+   flash: {
+@@ -130,6 +220,14 @@
+     shadowOpacity: 1,
+     shadowRadius: 18,
+   },
++  thought: {
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "center",
++    backgroundColor: colors.surface,
++    borderWidth: 2,
++    borderColor: MORY_COLORS.outline,
++  },
+   bubble: {
+     alignItems: "center",
+     justifyContent: "center",
+diff -ruN a/packages/ui/src/mory/motion.ts b/packages/ui/src/mory/motion.ts
+--- a/packages/ui/src/mory/motion.ts	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/mory/motion.ts	2026-10-10 01:25:37.195035546 -0700
+@@ -31,3 +31,17 @@
+   "worklet";
+   return t < 0.5 ? 22 * Math.sin(t * Math.PI * 12) : 0;
+ }
++
++/** A bell's ring: a quick decaying swing in the first third of the turn, then still. */
++export function ringAngle(t: number): number {
++  "worklet";
++  if (t >= 0.32) return 0;
++  return 14 * (1 - t / 0.32) * Math.sin(t * Math.PI * 25);
++}
++
++/** Two small hops early in the turn (0 at rest, 1 at the top of a hop). */
++export function hopAt(t: number): number {
++  "worklet";
++  if (t >= 0.4) return 0;
++  return Math.abs(Math.sin((t / 0.4) * Math.PI * 2));
++}
+diff -ruN a/packages/ui/src/mory/parts/face.tsx b/packages/ui/src/mory/parts/face.tsx
+--- a/packages/ui/src/mory/parts/face.tsx	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/mory/parts/face.tsx	2026-10-10 01:31:19.523035546 -0700
+@@ -1,7 +1,11 @@
+-import { Ellipse, Path } from "react-native-svg";
++import { Ellipse, G, Path } from "react-native-svg";
+ import { MORY_COLORS } from "../../theme/mory";
+ import type { MoryExpression } from "../types";
+ 
++/** The effects' four-point sparkle, on a 24 grid: Mory's eyes when a deal is too good. */
++const STAR =
++  "M12 0 C 13 8, 16 11, 24 12 C 16 13, 13 16, 12 24 C 11 16, 8 13, 0 12 C 8 11, 11 8, 12 0 Z";
++
+ export function MoryExpressionPart({
+   expression = "neutral",
+ }: {
+@@ -20,6 +24,35 @@
+         />
+       </>
+     );
++  if (expression === "starry")
++    return (
++      <>
++        {[82, 118].map((cx) => (
++          <G key={cx} transform={`translate(${cx - 13} 105) scale(${26 / 24})`}>
++            <Path d={STAR} fill={eye} />
++          </G>
++        ))}
++      </>
++    );
++  if (expression === "worried")
++    return (
++      <>
++        {/* Brows raised at the middle, eyes dropped a little, and one bead of sweat. */}
++        <Path
++          d="M72 105 Q80 103 88 99 M112 99 Q120 103 128 105"
++          fill="none"
++          stroke={eye}
++          strokeWidth={4}
++          strokeLinecap="round"
++        />
++        <Ellipse cx={82} cy={121} rx={4.5} ry={8} fill={eye} />
++        <Ellipse cx={118} cy={121} rx={4.5} ry={8} fill={eye} />
++        <Path
++          d="M141 94 C137 101 135 104 135 107 C135 110.5 137.5 112.5 140.5 112.5 C143.5 112.5 146 110.5 146 107 C146 104 144 101 141 94Z"
++          fill={MORY_COLORS.sweat}
++        />
++      </>
++    );
+   if (expression === "sleepy")
+     return (
+       <Path
+diff -ruN a/packages/ui/src/mory/parts/headpiece.tsx b/packages/ui/src/mory/parts/headpiece.tsx
+--- a/packages/ui/src/mory/parts/headpiece.tsx	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/mory/parts/headpiece.tsx	2026-10-10 01:32:58.279035546 -0700
+@@ -46,6 +46,78 @@
+         />
+       </G>
+     );
++  if (kind === "cherry")
++    return (
++      <>
++        {/* Two cherries on stems that meet under one leaf, sitting on top of the head. */}
++        <Path
++          d="M101 28 C95 36 89 44 86 54 M101 28 C107 38 112 47 114 58"
++          fill="none"
++          stroke={MORY_COLORS.stem}
++          strokeWidth={stroke * 0.7}
++          strokeLinecap="round"
++        />
++        <Path
++          d="M101 29 C109 17 126 18 128 24 C120 33 109 34 101 29Z"
++          fill={MORY_COLORS.leaf}
++          {...outline}
++        />
++        <Circle cx={86} cy={62} r={14} fill={MORY_COLORS.cherry} {...outline} />
++        <Circle
++          cx={115}
++          cy={65}
++          r={14}
++          fill={MORY_COLORS.cherry}
++          {...outline}
++        />
++        <Ellipse
++          cx={81}
++          cy={57}
++          rx={3.2}
++          ry={4.6}
++          fill={MORY_COLORS.cherryShine}
++          transform="rotate(25 81 57)"
++        />
++        <Ellipse
++          cx={110}
++          cy={60}
++          rx={3.2}
++          ry={4.6}
++          fill={MORY_COLORS.cherryShine}
++          transform="rotate(25 110 60)"
++        />
++      </>
++    );
++  if (kind === "lemon")
++    return (
++      <G transform="translate(0 -16)">
++        <Path
++          d="M100 58 L101 49"
++          stroke={MORY_COLORS.stem}
++          strokeWidth={stroke * 0.86}
++          strokeLinecap="round"
++        />
++        <Path
++          d="M101 52 C109 37 128 38 131 44 C123 54 110 57 101 52Z"
++          fill={MORY_COLORS.leaf}
++          {...outline}
++        />
++        {/* A lemon lying a little tilted, with a nub at each end. */}
++        <Path
++          d="M72 80 C70 76 73 72 77 72 C84 58 116 54 125 65 C128 63 132 65 131 70 C131 74 129 75 128 76 C124 92 88 98 78 86 C75 86 72 83 72 80Z"
++          fill={MORY_COLORS.lemon}
++          {...outline}
++        />
++        <Ellipse
++          cx={91}
++          cy={69}
++          rx={6.5}
++          ry={3.2}
++          fill={MORY_COLORS.lemonShine}
++          transform="rotate(-14 91 69)"
++        />
++      </G>
++    );
+   if (kind === "pear")
+     return (
+       <G transform="translate(0 -12)">
+diff -ruN a/packages/ui/src/mory/poses.ts b/packages/ui/src/mory/poses.ts
+--- a/packages/ui/src/mory/poses.ts	2026-10-09 23:52:35.000000000 -0700
++++ b/packages/ui/src/mory/poses.ts	2026-10-10 01:24:25.299035546 -0700
+@@ -24,6 +24,10 @@
+   type: { holding: "keyboard", loopMs: 3600, restAt: 0.2 },
+   empty: { holding: "box", loopMs: 3400, restAt: 0.3 },
+   offline: { holding: "plug", loopMs: 3000, restAt: 0.4 },
++  alert: { holding: "bell", loopMs: 2400, restAt: 0.12 },
++  drop: { holding: "drop", loopMs: 2600, restAt: 0.3 },
++  bought: { holding: "bag", loopMs: 3200, restAt: 0.25 },
++  search: { holding: "magnifier", loopMs: 2400, restAt: 0.3 },
+ };
+ export type MoryConfiguration = {
+   pose: MoryPose;
+diff -ruN a/packages/ui/src/mory/props/held.tsx b/packages/ui/src/mory/props/held.tsx
+--- a/packages/ui/src/mory/props/held.tsx	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/mory/props/held.tsx	2026-10-10 01:31:58.995035546 -0700
+@@ -1,5 +1,5 @@
+ import { StyleSheet, Text, View } from "react-native";
+-import { Circle, Path, G } from "react-native-svg";
++import { Circle, Ellipse, Path, G } from "react-native-svg";
+ import { PriceTagArtwork } from "./price-tag";
+ import { DealsProp } from "./deals";
+ 
+@@ -10,8 +10,9 @@
+  * What Mory has in its hands, drawn on the figure's 200 x 200 grid: a card with an orange (its
+  * everyday pose), a camera, a heart, a $ tag, a bundle of coupons, or the caller's own edge:
+  * nothing drawn, the body cut off below the hands; see EDGE_LINE, a sign with a word
+- * on it, a keyboard it types on, an open empty box (empty states), an unplugged cable (error states), or
+- * nothing while one hand waves.
++ * on it, a keyboard it types on, an open empty box (empty states), an unplugged cable (error states), a
++ * ringing bell (price alerts), a price-drop card (with the drop's words on it), the MoryDeals shopping bag
++ * (bought), a magnifier (searching / loading), or nothing while one hand waves.
+  */
+ export type MoryHolding =
+   | "none"
+@@ -26,7 +27,11 @@
+   | "wave"
+   | "keyboard"
+   | "box"
+-  | "plug";
++  | "plug"
++  | "bell"
++  | "drop"
++  | "bag"
++  | "magnifier";
+ 
+ /** For `edge`: the grid line the hands grip and the body is cut off at (the ledge's top). A caller lines its edge up with it. */
+ export const EDGE_LINE = 150;
+@@ -48,6 +53,10 @@
+   keyboard: { left: [78, 156], right: [122, 156] },
+   box: { left: [52, 150], right: [148, 150] },
+   plug: { left: [52, 150], right: [148, 150] },
++  bell: { left: [72, 152], right: [128, 152] },
++  drop: { left: [46, 170], right: [154, 170] },
++  bag: { left: [58, 162], right: [142, 162] },
++  magnifier: { left: [80, 156], right: [150, 150] },
+ };
+ 
+ /** The keyboard on the grid: a board with three rows of keys and a space bar. */
+@@ -107,31 +116,58 @@
+ /** What a sign says unless Mory is given its words. */
+ const SIGN_WORDS = "Hello!";
+ 
++/** The price-drop card on the grid; with words, the arrow moves left and the words sit to its right. */
++const DROP = { x: 44, y: 133, width: 112, height: 48 };
++const DROP_WORDS = { x: 80, y: 133, width: 74, height: 42 };
++
++/** Holdings that carry the caller's words, and where those words go. */
++export const WORDED = {
++  sign: { box: SIGN, color: MORY_COLORS.tag, fontSize: 24, inset: "4%" },
++  drop: { box: DROP_WORDS, color: MORY_COLORS.dropInk, fontSize: 21, inset: 0 },
++} as const;
++export const carriesWords = (
++  holding: MoryHolding,
++): holding is keyof typeof WORDED => holding in WORDED;
++
+ /**
+- * The words on Mory's sign, over the board, for a figure `size` wide. Real text rather than SVG text, so it
+- * is set in the app's font (SVG text does not use the loaded fonts). A short word or two fits.
++ * The words on Mory's sign (or price-drop card), over the board, for a figure `size` wide. Real text rather
++ * than SVG text, so it is set in the app's font (SVG text does not use the loaded fonts). A short word or two
++ * fits; on the drop card, a short amount such as "-18%". Without words, a sign says Hello! and a drop card
++ * shows only its arrow.
+  */
+-export function SignWords({ size, words }: { size: number; words?: string }) {
++export function SignWords({
++  size,
++  words,
++  holding = "sign",
++}: {
++  size: number;
++  words?: string;
++  holding?: keyof typeof WORDED;
++}) {
+   const unit = size / 200;
++  const { box, color, fontSize, inset } = WORDED[holding];
++  const text = words ?? (holding === "sign" ? SIGN_WORDS : undefined);
++  if (text === undefined) return null;
+   return (
+     <View
+       pointerEvents="none"
+       style={[
+         styles.sign,
+         {
+-          left: SIGN.x * unit,
+-          top: SIGN.y * unit,
+-          width: SIGN.width * unit,
+-          height: SIGN.height * unit,
++          left: box.x * unit,
++          top: box.y * unit,
++          width: box.width * unit,
++          height: box.height * unit,
++          paddingHorizontal: inset,
+         },
+       ]}
+     >
+       <Text
+-        style={[styles.words, { fontSize: 24 * unit }]}
++        style={[styles.words, { fontSize: fontSize * unit, color }]}
+         numberOfLines={1}
+         adjustsFontSizeToFit
+       >
+-        {words ?? SIGN_WORDS}
++        {text}
+       </Text>
+     </View>
+   );
+@@ -155,9 +191,12 @@
+ export function Held({
+   holding,
+   stroke,
++  labelled = false,
+ }: {
+   holding: MoryHolding;
+   stroke: number;
++  /** For `drop`: words go on the card (SignWords), so the arrow makes room for them. */
++  labelled?: boolean;
+ }) {
+   const outline = {
+     stroke: MORY_COLORS.outline,
+@@ -349,6 +388,113 @@
+           />
+         </>
+       );
++    case "bell":
++      return (
++        <>
++          {/* A price-alert bell: knob, dome, flared rim and the clapper below. */}
++          <Circle
++            cx={100}
++            cy={176}
++            r={6.5}
++            fill={MORY_COLORS.orange}
++            {...outline}
++          />
++          <Path
++            d="M100 124 C84 124 77 136 77 151 V160 L69 170 H131 L123 160 V151 C123 136 116 124 100 124Z"
++            fill={MORY_COLORS.spark}
++            {...outline}
++          />
++          <Circle
++            cx={100}
++            cy={120}
++            r={5}
++            fill={MORY_COLORS.spark}
++            {...outline}
++          />
++          <Ellipse
++            cx={89}
++            cy={142}
++            rx={3.6}
++            ry={7}
++            fill={MORY_COLORS.orangeShine}
++            transform="rotate(18 89 142)"
++          />
++        </>
++      );
++    case "drop": {
++      const cx = labelled ? 64 : 100;
++      return (
++        <>
++          <Path
++            d={roundedRect(DROP.x, DROP.y, DROP.width, DROP.height, 13)}
++            fill={MORY_COLORS.drop}
++            {...outline}
++          />
++          <Circle cx={cx} cy={155} r={14} fill={MORY_COLORS.dropInk} />
++          <Path
++            d={`M${cx} 147 V163 M${cx - 7} 156.5 L${cx} 163.5 L${cx + 7} 156.5`}
++            fill="none"
++            stroke={MORY_COLORS.body}
++            strokeWidth={4.5}
++            strokeLinecap="round"
++            strokeLinejoin="round"
++          />
++        </>
++      );
++    }
++    case "bag":
++      return (
++        <>
++          {/* The MoryDeals bag: a red bag with a round handle and a white smile. */}
++          <Path
++            d="M86 148 V140 Q86 126 100 126 Q114 126 114 140 V148"
++            fill="none"
++            stroke={MORY_COLORS.outline}
++            strokeWidth={stroke}
++            strokeLinecap="round"
++          />
++          <Path
++            d="M62 146 H138 L144 183 Q145 189 139 189 H61 Q55 189 56 183 Z"
++            fill={MORY_COLORS.tag}
++            {...outline}
++          />
++          <Path
++            d="M86 161 Q100 174 114 161"
++            fill="none"
++            stroke={MORY_COLORS.tagInk}
++            strokeWidth={5}
++            strokeLinecap="round"
++          />
++        </>
++      );
++    case "magnifier":
++      return (
++        <>
++          {/* Held up to Mory's right eye; the glass is see-through, so the eye shows behind it. */}
++          <G transform="rotate(45 91.8 144.2)">
++            <Path
++              d={roundedRect(85.8, 129.2, 12, 30, 6)}
++              fill={MORY_COLORS.orange}
++              {...outline}
++            />
++          </G>
++          <Circle
++            cx={118}
++            cy={118}
++            r={22}
++            fill={MORY_COLORS.lens}
++            fillOpacity={0.5}
++            {...outline}
++          />
++          <Path
++            d="M105 112 Q107 104 115 102"
++            fill="none"
++            stroke={MORY_COLORS.body}
++            strokeWidth={4}
++            strokeLinecap="round"
++          />
++        </>
++      );
+     case "wave":
+       return null;
+   }
+diff -ruN a/packages/ui/src/mory/types.ts b/packages/ui/src/mory/types.ts
+--- a/packages/ui/src/mory/types.ts	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/mory/types.ts	2026-10-10 01:32:58.267035546 -0700
+@@ -13,9 +13,16 @@
+   | "welcome"
+   | "type"
+   | "empty"
+-  | "offline";
+-export type MoryHeadpiece = "orange" | "apple" | "pear" | "none";
+-export type MoryExpression = "neutral" | "happy" | "wink" | "sleepy";
++  | "offline"
++  | "alert"
++  | "drop"
++  | "bought"
++  | "search";
++export type MoryHeadpiece =
++  "orange" | "apple" | "pear" | "cherry" | "lemon" | "none";
++/** `starry` is for a great deal; `worried` is for scenes (errors, no results), not a shopper's everyday look. */
++export type MoryExpression =
++  "neutral" | "happy" | "wink" | "sleepy" | "starry" | "worried";
+ export type MoryHandMotion = "hold" | "wave" | "tap";
+ export type MoryMotion = {
+   body?: "bob" | "still";
+diff -ruN a/packages/ui/src/theme/mory.ts b/packages/ui/src/theme/mory.ts
+--- a/packages/ui/src/theme/mory.ts	2026-10-09 21:52:03.000000000 -0700
++++ b/packages/ui/src/theme/mory.ts	2026-10-10 01:24:18.971035546 -0700
+@@ -20,4 +20,16 @@
+   /** The unplugged cable (error states). */
+   cable: "#6F6760",
+   spark: "#FFC53D",
++  /** Cherries and lemon: more head fruit for Customize Mory. */
++  cherry: "#E8323C",
++  cherryShine: "#FFB3B0",
++  lemon: "#FFE04D",
++  lemonShine: "#FFF6C2",
++  /** The price-drop card Mory holds up: the app's own "dropped" greens. */
++  drop: colors.successSoft,
++  dropInk: colors.success,
++  /** The magnifier's glass (searching, loading). */
++  lens: "#E4EBFF",
++  /** A bead of worry beside Mory's head. */
++  sweat: "#9CC7F5",
+ } as const;
+diff -ruN a/packages/ui/test/mory.test.mts b/packages/ui/test/mory.test.mts
+--- a/packages/ui/test/mory.test.mts	2026-10-09 23:54:05.000000000 -0700
++++ b/packages/ui/test/mory.test.mts	2026-10-10 01:32:58.327035546 -0700
+@@ -2,7 +2,13 @@
+ import assert from "node:assert/strict";
+ import { MORY_POSES, resolveMory } from "../src/mory/poses.ts";
+ import { strikeAt, keyLightAt } from "../src/mory/motion/hands.ts";
+-import { blinkAt, bobAt, waveAngle } from "../src/mory/motion.ts";
++import {
++  blinkAt,
++  bobAt,
++  hopAt,
++  ringAngle,
++  waveAngle,
++} from "../src/mory/motion.ts";
+ 
+ test("old poses keep their held objects while explicit parts compose independently", () => {
+   for (const [pose, preset] of Object.entries(MORY_POSES)) {
+@@ -98,3 +104,37 @@
+   assert.equal(resolveMory({ size: 64 }).headpiece, "orange");
+   assert.equal(resolveMory({ size: 64 }).expression, "neutral");
+ });
++
++test("the new moments keep their own held objects and leave the shopper's look alone", () => {
++  const expected = {
++    alert: "bell",
++    drop: "drop",
++    bought: "bag",
++    search: "magnifier",
++  } as const;
++  const look = { headpiece: "cherry", expression: "starry" } as const;
++  for (const [pose, holding] of Object.entries(expected)) {
++    const config = resolveMory(
++      { size: 120, pose: pose as keyof typeof expected },
++      look,
++    );
++    assert.equal(config.holding, holding);
++    assert.equal(config.hands, "hold");
++    assert.equal(config.headpiece, "cherry");
++    assert.equal(config.expression, "starry");
++  }
++});
++
++test("the bell rings and the drop card hops early in the turn, then rest without a jump", () => {
++  for (const t of [0, 0.32, 0.5, 0.99, 1]) assert.equal(ringAngle(t), 0);
++  assert.ok(Math.abs(ringAngle(0.3199999)) < 0.01);
++  assert.ok(
++    Math.max(...[0.02, 0.06, 0.1].map((t) => Math.abs(ringAngle(t)))) > 5,
++  );
++  for (const t of [0, 0.4, 0.7, 1]) assert.ok(Math.abs(hopAt(t)) < 1e-9);
++  assert.ok(Math.abs(hopAt(0.1) - 1) < 1e-9);
++  for (let i = 0; i <= 100; i++) {
++    assert.ok(hopAt(i / 100) >= 0 && hopAt(i / 100) <= 1);
++    assert.ok(Math.abs(ringAngle(i / 100)) <= 14);
++  }
++});

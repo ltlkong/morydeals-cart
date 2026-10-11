@@ -1,0 +1,62 @@
+When using a proxy, it is heavily recommended that you pass `geoip=True`. at file:///Users/tielinli/Workspace/morydeals-cart/node_modules/camoufox-js/dist/warnings.js:21
+{
+  "status": "failed",
+  "auditId": "product-page/2026-10-11/www.homedepot.ca/b1b8e6ed65a3d48f/7ecc162e-0d67-48ea-a0c4-76c75b9f0167--ad2cdd10-cc3d-4c1a-a09b-2f453bf5485f",
+  "timings": {
+    "scope": "failed",
+    "totalMs": 20466.1,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 60.268,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 711.3,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 19568.651,
+        "status": "failed"
+      },
+      "archive": {
+        "durationMs": 107.319,
+        "status": "completed"
+      },
+      "databaseFailure": {
+        "durationMs": 15.821,
+        "status": "completed"
+      }
+    }
+  },
+  "reason": "incomplete",
+  "acquisition": {
+    "version": 1,
+    "status": "incomplete",
+    "reason": "incomplete",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T02:50:36.178Z",
+        "completedAt": "2026-10-11T02:50:36.210Z",
+        "durationMs": 32.104,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing",
+        "captureFile": "response-0.body"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T02:50:36.210Z",
+        "completedAt": "2026-10-11T02:50:55.746Z",
+        "durationMs": 19535.997,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing"
+      }
+    ]
+  },
+  "error": "A single primary product heading is missing"
+}

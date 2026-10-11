@@ -1,0 +1,62 @@
+When using a proxy, it is heavily recommended that you pass `geoip=True`. at file:///Users/tielinli/Workspace/morydeals-cart/node_modules/camoufox-js/dist/warnings.js:21
+{
+  "status": "failed",
+  "auditId": "product-page/2026-10-11/www.amazon.com/2ee7e582c9202072/a8b7eaa1-3898-4fb2-9e64-f30c7b9d5df3--83b7ccb9-a79b-4e3e-9a7e-0facea007e24",
+  "timings": {
+    "scope": "failed",
+    "totalMs": 19774.569,
+    "stages": {
+      "databaseStart": {
+        "durationMs": 60.164,
+        "status": "completed"
+      },
+      "decision": {
+        "durationMs": 2207.46,
+        "status": "completed"
+      },
+      "acquisition": {
+        "durationMs": 17421.634,
+        "status": "failed"
+      },
+      "archive": {
+        "durationMs": 47.632,
+        "status": "completed"
+      },
+      "databaseFailure": {
+        "durationMs": 13.638,
+        "status": "completed"
+      }
+    }
+  },
+  "reason": "incomplete",
+  "acquisition": {
+    "version": 1,
+    "status": "incomplete",
+    "reason": "incomplete",
+    "attempts": [
+      {
+        "index": 0,
+        "mode": "http",
+        "startedAt": "2026-10-11T02:51:15.585Z",
+        "completedAt": "2026-10-11T02:51:15.710Z",
+        "durationMs": 124.712,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing",
+        "captureFile": "response-0.body"
+      },
+      {
+        "index": 1,
+        "mode": "browser",
+        "browser": "camoufox",
+        "startedAt": "2026-10-11T02:51:15.710Z",
+        "completedAt": "2026-10-11T02:51:33.006Z",
+        "durationMs": 17296.25,
+        "status": "failed",
+        "reason": "incomplete",
+        "message": "A single primary product heading is missing"
+      }
+    ]
+  },
+  "error": "A single primary product heading is missing"
+}

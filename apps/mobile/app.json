@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "MoryCart",
+    "slug": "morydeals",
+    "scheme": "morycart",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "com.morydeals.cart",
+      "supportsTablet": true,
+      "appleTeamId": "4NJ4K8S975"
+    },
+    "android": {
+      "package": "com.morydeals.cart"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "./plugins/with-scene-lifecycle",
+      "expo-secure-store"
+    ]
+  }
+}

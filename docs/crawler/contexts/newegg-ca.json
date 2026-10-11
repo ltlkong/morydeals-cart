@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "locale": "en-CA",
+  "acquisition": {
+    "mode": "browser",
+    "browser": "camoufox",
+    "timeoutMs": 30000,
+    "waitFor": {
+      "selector": "h1"
+    }
+  },
+  "parsing": {
+    "strategy": "newegg-ca"
+  }
+}

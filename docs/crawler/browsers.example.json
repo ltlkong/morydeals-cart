@@ -1,0 +1,15 @@
+[
+  {
+    "id": "remote_firefox",
+    "engine": "firefox",
+    "transport": "playwright",
+    "endpointEnv": "REMOTE_FIREFOX_WS"
+  },
+  {
+    "id": "remote_chrome",
+    "engine": "chromium",
+    "transport": "cdp",
+    "endpointEnv": "REMOTE_CHROME_CDP",
+    "stagehand": true
+  }
+]

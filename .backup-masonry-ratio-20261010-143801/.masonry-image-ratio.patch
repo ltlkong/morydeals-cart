@@ -1,0 +1,719 @@
+diff --git a/apps/mobile/src/account/HistoryScreen.tsx b/apps/mobile/src/account/HistoryScreen.tsx
+index b022088..445c0f0 100644
+--- a/apps/mobile/src/account/HistoryScreen.tsx
++++ b/apps/mobile/src/account/HistoryScreen.tsx
+@@ -5,9 +5,9 @@ import {
+   useWindowDimensions,
+ } from "react-native";
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+-import { Copy, Masonry, Mory } from "@morydeals/ui";
++import { Copy, Mory } from "@morydeals/ui";
+ import type { MobileProduct } from "../products-api";
+-import { Product, productCardHeight } from "../cart/Product";
++import { ProductMasonry } from "../cart/ProductMasonry";
+ import { StackScreen } from "../navigation/StackScreen";
+ 
+ /** Products found while browsing stores, newest first, as cards like the cart's; a card opens the product's page. */
+@@ -32,20 +32,11 @@ export function HistoryScreen({
+         ]}
+       >
+         {products.length ? (
+-          <Masonry
+-            items={products}
++          <ProductMasonry
++            products={products}
+             width={available}
+             columns={width > 650 ? 3 : 2}
+-            gap={10}
+-            keyExtractor={(p) => p.url}
+-            getItemHeight={(_, w) => productCardHeight(w)}
+-            renderItem={(product, w) => (
+-              <Product
+-                product={product}
+-                width={w}
+-                onPress={() => onOpen(product)}
+-              />
+-            )}
++            onPress={onOpen}
+           />
+         ) : (
+           <View style={s.empty}>
+diff --git a/apps/mobile/src/browse/HomeSections.tsx b/apps/mobile/src/browse/HomeSections.tsx
+index 95b525b..9bc73bc 100644
+--- a/apps/mobile/src/browse/HomeSections.tsx
++++ b/apps/mobile/src/browse/HomeSections.tsx
+@@ -5,7 +5,6 @@ import {
+   Button,
+   Chip,
+   Copy,
+-  Masonry,
+   MoryAvatar,
+   Pressable,
+   SearchField,
+@@ -18,7 +17,8 @@ import {
+   type BrowserTarget,
+ } from "../merchants/MerchantPicker";
+ import type { MobileProduct } from "../products-api";
+-import { Product, productCardHeight } from "../cart/Product";
++import { Product } from "../cart/Product";
++import { ProductMasonry } from "../cart/ProductMasonry";
+ import { storeLabel, storeTiles } from "./home-state";
+ import { feedVisible, type CatalogFeed } from "./catalog-feed";
+ 
+@@ -198,7 +198,6 @@ function ProductsSection({
+   width,
+ }: HomeContext) {
+   const stores = catalog?.merchants ?? [];
+-  const first = feed.items.length === 0;
+   return (
+     <View style={s.section}>
+       <SectionHeader>Products</SectionHeader>
+@@ -224,44 +223,56 @@ function ProductsSection({
+           ))}
+         </ScrollView>
+       ) : null}
+-      <Masonry
+-        items={feed.items}
++      <ProductMasonry
++        products={feed.items}
+         width={width}
+         columns={width > 650 ? 3 : 2}
+-        gap={10}
+-        keyExtractor={(p) => p.url}
+-        getItemHeight={(_, w) => productCardHeight(w)}
+-        renderItem={(product, w) => (
+-          <Product
+-            product={product}
+-            width={w}
+-            onPress={() => openProduct(product)}
+-          />
++        onPress={openProduct}
++        footer={(measuring) => (
++          <ProductsFooter feed={feed} measuring={measuring} retry={retry} />
+         )}
+       />
+-      <View style={[s.footer, first && s.footerFirst]}>
+-        {feed.status === "loading" ? (
+-          <ActivityIndicator
+-            color={colors.accent}
+-            accessibilityLabel={
+-              first ? "Loading products" : "Loading more products"
+-            }
+-          />
+-        ) : feed.status === "error" ? (
+-          <>
+-            <Copy accessibilityRole="alert" tone="muted" style={s.footerText}>
+-              {feed.error}
+-            </Copy>
+-            <Button secondary onPress={retry}>
+-              Try again
+-            </Button>
+-          </>
+-        ) : first ? (
+-          <Copy tone="muted" style={s.footerText}>
+-            No products from this store yet.
++    </View>
++  );
++}
++
++/**
++ * Under the products: a spinner while a page loads or its cards are still measuring their images, an error with
++ * a retry, or (a store with nothing yet) a note.
++ */
++function ProductsFooter({
++  feed,
++  measuring,
++  retry,
++}: {
++  feed: CatalogFeed;
++  measuring: boolean;
++  retry: () => void;
++}) {
++  const first = feed.items.length === 0;
++  return (
++    <View style={[s.footer, first && s.footerFirst]}>
++      {feed.status === "loading" || measuring ? (
++        <ActivityIndicator
++          color={colors.accent}
++          accessibilityLabel={
++            first ? "Loading products" : "Loading more products"
++          }
++        />
++      ) : feed.status === "error" ? (
++        <>
++          <Copy accessibilityRole="alert" tone="muted" style={s.footerText}>
++            {feed.error}
+           </Copy>
+-        ) : null}
+-      </View>
++          <Button secondary onPress={retry}>
++            Try again
++          </Button>
++        </>
++      ) : first ? (
++        <Copy tone="muted" style={s.footerText}>
++          No products from this store yet.
++        </Copy>
++      ) : null}
+     </View>
+   );
+ }
+diff --git a/apps/mobile/src/cart/CartPage.tsx b/apps/mobile/src/cart/CartPage.tsx
+index a201833..a1fe5e5 100644
+--- a/apps/mobile/src/cart/CartPage.tsx
++++ b/apps/mobile/src/cart/CartPage.tsx
+@@ -1,8 +1,8 @@
+ import { memo } from "react";
+ import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+-import { Button, Copy, Masonry, Mory, colors } from "@morydeals/ui";
++import { Button, Copy, Mory, colors } from "@morydeals/ui";
+ import type { MobileProduct } from "../products-api";
+-import { Product, productCardHeight } from "./Product";
++import { ProductMasonry } from "./ProductMasonry";
+ 
+ /** Edit mode: cards select instead of opening, for bulk actions on the selection. */
+ export type CartEditing = {
+@@ -85,23 +85,16 @@ export const CartPage = memo(function CartPage({
+           />
+         </View>
+       ) : null}
+-      <Masonry
+-        items={products}
++      <ProductMasonry
++        products={products}
+         width={width}
+         columns={columns}
+-        gap={10}
+-        keyExtractor={(p) => p.url}
+-        getItemHeight={(_, w) => productCardHeight(w)}
+-        renderItem={(product, w) => (
+-          <Product
+-            product={product}
+-            width={w}
+-            selected={editing ? editing.selected.has(product.url) : undefined}
+-            onPress={() =>
+-              editing ? editing.onToggle(product.url) : onOpen(product)
+-            }
+-          />
+-        )}
++        selectedOf={
++          editing ? (product) => editing.selected.has(product.url) : undefined
++        }
++        onPress={(product) =>
++          editing ? editing.onToggle(product.url) : onOpen(product)
++        }
+       />
+     </View>
+   );
+diff --git a/apps/mobile/src/cart/Product.tsx b/apps/mobile/src/cart/Product.tsx
+index f5df6e0..f707bf0 100644
+--- a/apps/mobile/src/cart/Product.tsx
++++ b/apps/mobile/src/cart/Product.tsx
+@@ -1,12 +1,20 @@
+-import { ProductCard } from "@morydeals/ui";
++import { IMAGE_RATIO_FALLBACK, ProductCard } from "@morydeals/ui";
+ import type { MobileProduct } from "../products-api";
+ import { money } from "../money";
+ import { percentOff } from "../product/product-store";
+ import { priceTrend } from "./price-trend";
+ 
+-/** A product card's height for its width, so every masonry of cards lays out the same. */
+-export const productCardHeight = (width: number) =>
+-  Math.round(width * 0.85) + 138;
++/** The card's image box height: its width times the image's ratio (see useMeasuredItems), else the fixed shape. */
++export const productImageHeight = (
++  width: number,
++  ratio = IMAGE_RATIO_FALLBACK,
++) => Math.round(width * ratio);
++/** A product card's height for its width and image ratio, so the masonry knows it before the card renders. */
++export const productCardHeight = (width: number, ratio?: number) =>
++  productImageHeight(width, ratio) + 138;
++/** The image a product card shows, for measuring it first. */
++export const productImageUrl = (product: MobileProduct) => product.images[0];
++export const productKey = (product: MobileProduct) => product.url;
+ 
+ /**
+  * A saved product as a card: image, price, trend and store. It has no buttons: a press opens the product's page,
+@@ -17,9 +25,12 @@ export function Product({
+   width,
+   onPress,
+   selected,
++  ratio,
+ }: {
+   product: MobileProduct;
+   width: number;
++  /** The image box's height / width; the fixed 0.85 shape when not given (e.g. a shelf of equal cards). */
++  ratio?: number;
+   /** Opens the product's page, or (editing) selects the card. */
+   onPress: () => void;
+   /** Editing a collection: the card shows whether it is selected. */
+@@ -33,7 +44,7 @@ export function Product({
+     <ProductCard
+       width={width}
+       variant="vertical-small"
+-      imageHeight={Math.round(width * 0.85)}
++      imageHeight={productImageHeight(width, ratio)}
+       card={{
+         title: product.title,
+         imageUrl: product.images[0],
+diff --git a/apps/mobile/src/cart/ProductMasonry.tsx b/apps/mobile/src/cart/ProductMasonry.tsx
+new file mode 100644
+index 0000000..d8187fd
+--- /dev/null
++++ b/apps/mobile/src/cart/ProductMasonry.tsx
+@@ -0,0 +1,68 @@
++import type { ReactNode } from "react";
++import { ActivityIndicator, View } from "react-native";
++import { Masonry, colors, useMeasuredItems } from "@morydeals/ui";
++import type { MobileProduct } from "../products-api";
++import {
++  Product,
++  productCardHeight,
++  productImageUrl,
++  productKey,
++} from "./Product";
++
++/**
++ * Product cards in a masonry, each image box shaped like its image. A card appears once its image is measured
++ * (in order, so cards are only ever appended and never move); until then the footer shows a spinner.
++ */
++export function ProductMasonry({
++  products,
++  width,
++  columns,
++  onPress,
++  selectedOf,
++  footer = (measuring) =>
++    measuring ? (
++      <View style={{ paddingVertical: 12 }}>
++        <ActivityIndicator
++          color={colors.accent}
++          accessibilityLabel="Loading products"
++        />
++      </View>
++    ) : null,
++}: {
++  products: readonly MobileProduct[];
++  width: number;
++  columns: number;
++  onPress: (product: MobileProduct) => void;
++  /** Editing: whether a card is selected (undefined when not editing). */
++  selectedOf?: (product: MobileProduct) => boolean | undefined;
++  /** Below the cards; `measuring` is true while later cards wait for their images. */
++  footer?: (measuring: boolean) => ReactNode;
++}) {
++  const { ready, ratioOf, measuring } = useMeasuredItems(
++    products,
++    productKey,
++    productImageUrl,
++  );
++  return (
++    <>
++      <Masonry
++        items={ready}
++        width={width}
++        columns={columns}
++        gap={10}
++        keyExtractor={productKey}
++        getItemHeight={(product, w) => productCardHeight(w, ratioOf(product))}
++        renderItem={(product, w) => (
++          <Product
++            product={product}
++            width={w}
++            ratio={ratioOf(product)}
++            selected={selectedOf?.(product)}
++            onPress={() => onPress(product)}
++          />
++        )}
++      />
++      {footer(measuring)}
++    </>
++  );
++}
+diff --git a/apps/mobile/src/lists/ListScreen.tsx b/apps/mobile/src/lists/ListScreen.tsx
+index a44a34c..aafbc73 100644
+--- a/apps/mobile/src/lists/ListScreen.tsx
++++ b/apps/mobile/src/lists/ListScreen.tsx
+@@ -10,9 +10,9 @@ import {
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+ import { Ellipsis } from "lucide-react-native";
+ import { userMessage } from "../errors";
+-import { Copy, Masonry, Mory, colors } from "@morydeals/ui";
++import { Copy, Mory, colors } from "@morydeals/ui";
+ import type { MobileProduct } from "../products-api";
+-import { Product, productCardHeight } from "../cart/Product";
++import { ProductMasonry } from "../cart/ProductMasonry";
+ import { HeaderButton, StackScreen } from "../navigation/StackScreen";
+ import { deleteList, getList, renameList, type ListDetail } from "./lists-api";
+ import { ListNameSheet } from "./ListNameSheet";
+@@ -125,20 +125,11 @@ export function ListScreen({
+             <ActivityIndicator color={colors.accent} />
+           )
+         ) : list.products.length ? (
+-          <Masonry
+-            items={list.products}
++          <ProductMasonry
++            products={list.products}
+             width={available}
+             columns={width > 650 ? 3 : 2}
+-            gap={10}
+-            keyExtractor={(p) => p.url}
+-            getItemHeight={(_, w) => productCardHeight(w)}
+-            renderItem={(product, w) => (
+-              <Product
+-                product={product}
+-                width={w}
+-                onPress={() => onOpen(product)}
+-              />
+-            )}
++            onPress={onOpen}
+           />
+         ) : (
+           <View style={s.empty}>
+diff --git a/packages/ui/src/index.ts b/packages/ui/src/index.ts
+index 841c7a8..2e28d82 100644
+--- a/packages/ui/src/index.ts
++++ b/packages/ui/src/index.ts
+@@ -39,6 +39,14 @@ export type {
+ 
+ // Layout, charts and assistant
+ export * from "./layout/Masonry";
++export {
++  IMAGE_RATIO_FALLBACK,
++  IMAGE_RATIO_MAX,
++  IMAGE_RATIO_MIN,
++  imageRatio,
++  type ImageSize,
++} from "./layout/image-ratio";
++export { useMeasuredItems } from "./layout/useMeasuredItems";
+ export { MoryField } from "./layout/MoryField";
+ export {
+   PullToRefresh,
+diff --git a/packages/ui/src/layout/image-ratio.ts b/packages/ui/src/layout/image-ratio.ts
+new file mode 100644
+index 0000000..d440e08
+--- /dev/null
++++ b/packages/ui/src/layout/image-ratio.ts
+@@ -0,0 +1,115 @@
++/**
++ * Product images in a masonry: each card's image box follows the image's own shape, measured before the card is
++ * shown, so a card never changes height (and the cards below it never move) once it is on screen.
++ */
++export type ImageSize = { width: number; height: number };
++
++/**
++ * Height / width bounds of an image box. 0.75 (4:3 landscape) keeps wide banners from shrinking a card to a sliver
++ * of picture over a block of text; 1.6 (a bit taller than 2:3 apparel shots) keeps one tall image from filling
++ * a phone screen. Images past a bound are letterboxed in the box, never cropped.
++ */
++export const IMAGE_RATIO_MIN = 0.75;
++export const IMAGE_RATIO_MAX = 1.6;
++/** The box when an image has no URL, fails or times out: the cards' previous fixed shape. */
++export const IMAGE_RATIO_FALLBACK = 0.85;
++
++const usable = (size: ImageSize | null | undefined): size is ImageSize =>
++  !!size &&
++  Number.isFinite(size.width) &&
++  Number.isFinite(size.height) &&
++  size.width > 0 &&
++  size.height > 0;
++
++/** The image box's height / width for a measured image (null: unknown or failed). */
++export function imageRatio(size: ImageSize | null | undefined): number {
++  if (!usable(size)) return IMAGE_RATIO_FALLBACK;
++  return Math.min(
++    IMAGE_RATIO_MAX,
++    Math.max(IMAGE_RATIO_MIN, size.height / size.width),
++  );
++}
++
++/**
++ * How many leading items may be shown: every item up to the first one still measuring. A later image that loads
++ * first waits for the earlier ones, so cards appear in their order and are only ever appended.
++ */
++export function settledPrefix<T>(
++  items: readonly T[],
++  settled: (item: T) => boolean,
++): number {
++  const waiting = items.findIndex((item) => !settled(item));
++  return waiting === -1 ? items.length : waiting;
++}
++
++export type ImageSizeCache = {
++  /** The image's size; null if it failed or timed out; undefined while unknown. */
++  peek: (url: string) => ImageSize | null | undefined;
++  /** Measures once per URL (concurrent callers share the request); never rejects. */
++  get: (url: string) => Promise<ImageSize | null>;
++};
++
++/**
++ * Image sizes by URL, kept for the session. At most `concurrency` measurements run at once; one that takes longer
++ * than `timeoutMs` settles as null (the fallback shape). If it still arrives later, the size is kept for the next
++ * time the image is shown; a card already on screen keeps its shape.
++ */
++export function createImageSizeCache({
++  measure,
++  concurrency = 6,
++  timeoutMs = 4000,
++}: {
++  measure: (url: string) => Promise<ImageSize>;
++  concurrency?: number;
++  timeoutMs?: number;
++}): ImageSizeCache {
++  const known = new Map<string, ImageSize | null>();
++  const pending = new Map<string, Promise<ImageSize | null>>();
++  const queue: (() => void)[] = [];
++  let active = 0;
++  const pump = () => {
++    while (active < concurrency && queue.length) queue.shift()!();
++  };
++  const run = (url: string, resolve: (size: ImageSize | null) => void) => {
++    active++;
++    let settled = false;
++    const finish = (size: ImageSize | null) => {
++      if (settled) return;
++      settled = true;
++      clearTimeout(timer);
++      active--;
++      known.set(url, size);
++      pending.delete(url);
++      resolve(size);
++      pump();
++    };
++    const timer = setTimeout(() => finish(null), timeoutMs);
++    let measuring: Promise<ImageSize>;
++    try {
++      measuring = measure(url);
++    } catch {
++      measuring = Promise.reject(new Error("measure failed"));
++    }
++    measuring.then(
++      (size) => {
++        if (!settled) finish(usable(size) ? size : null);
++        else if (usable(size)) known.set(url, size);
++      },
++      () => finish(null),
++    );
++  };
++  return {
++    peek: (url) => known.get(url),
++    get(url) {
++      if (known.has(url)) return Promise.resolve(known.get(url) ?? null);
++      const waiting = pending.get(url);
++      if (waiting) return waiting;
++      const promise = new Promise<ImageSize | null>((resolve) => {
++        queue.push(() => run(url, resolve));
++      });
++      pending.set(url, promise);
++      pump();
++      return promise;
++    },
++  };
++}
+diff --git a/packages/ui/src/layout/useMeasuredItems.ts b/packages/ui/src/layout/useMeasuredItems.ts
+new file mode 100644
+index 0000000..497e110
+--- /dev/null
++++ b/packages/ui/src/layout/useMeasuredItems.ts
+@@ -0,0 +1,74 @@
++import { useEffect, useReducer, useRef } from "react";
++import { Image } from "react-native";
++import {
++  IMAGE_RATIO_FALLBACK,
++  createImageSizeCache,
++  imageRatio,
++  settledPrefix,
++  type ImageSize,
++} from "./image-ratio";
++
++/** Image.getSize on native and web (react-native-web loads the image and reads its natural size). */
++const sizes = createImageSizeCache({
++  measure: (url) =>
++    new Promise<ImageSize>((resolve, reject) =>
++      Image.getSize(
++        url,
++        (width, height) => resolve({ width, height }),
++        (error) => reject(error),
++      ),
++    ),
++});
++
++/**
++ * The items a masonry may show now, and each one's image ratio (height / width). Items appear in order once their
++ * image is measured (or has no URL, fails or times out, which gives the fallback ratio); `measuring` is true while
++ * later items wait. A shown item's ratio never changes, so a card never resizes after it appears.
++ */
++export function useMeasuredItems<T>(
++  items: readonly T[],
++  keyOf: (item: T) => string,
++  imageOf: (item: T) => string | undefined,
++) {
++  const [, measured] = useReducer((n: number) => n + 1, 0);
++  // Ratios of the items already shown, frozen for this masonry.
++  const shown = useRef(new Map<string, number>());
++  useEffect(() => {
++    let live = true;
++    for (const item of items) {
++      const url = imageOf(item);
++      if (
++        url &&
++        sizes.peek(url) === undefined &&
++        !shown.current.has(keyOf(item))
++      )
++        void sizes.get(url).then(() => {
++          if (live) measured();
++        });
++    }
++    return () => {
++      live = false;
++    };
++    // keyOf and imageOf are read for these items only; a new function identity alone needs no new requests.
++  }, [items]);
++  const count = settledPrefix(items, (item) => {
++    const url = imageOf(item);
++    return (
++      !url || shown.current.has(keyOf(item)) || sizes.peek(url) !== undefined
++    );
++  });
++  const ready = items.slice(0, count);
++  for (const item of ready) {
++    const key = keyOf(item);
++    if (!shown.current.has(key)) {
++      const url = imageOf(item);
++      shown.current.set(key, imageRatio(url ? sizes.peek(url) : null));
++    }
++  }
++  return {
++    ready,
++    ratioOf: (item: T) =>
++      shown.current.get(keyOf(item)) ?? IMAGE_RATIO_FALLBACK,
++    measuring: count < items.length,
++  };
++}
+diff --git a/packages/ui/test/image-ratio.test.mts b/packages/ui/test/image-ratio.test.mts
+new file mode 100644
+index 0000000..7e7ca8f
+--- /dev/null
++++ b/packages/ui/test/image-ratio.test.mts
+@@ -0,0 +1,121 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import {
++  IMAGE_RATIO_FALLBACK,
++  IMAGE_RATIO_MAX,
++  IMAGE_RATIO_MIN,
++  createImageSizeCache,
++  imageRatio,
++  settledPrefix,
++  type ImageSize,
++} from "../src/layout/image-ratio.ts";
++
++const later = (ms: number) => new Promise((r) => setTimeout(r, ms));
++
++test("an image box follows the image's height / width, within 0.75…1.6", () => {
++  assert.equal(imageRatio({ width: 800, height: 800 }), 1);
++  assert.equal(imageRatio({ width: 600, height: 900 }), 1.5);
++  assert.equal(imageRatio({ width: 1600, height: 900 }), IMAGE_RATIO_MIN);
++  assert.equal(imageRatio({ width: 500, height: 2000 }), IMAGE_RATIO_MAX);
++});
++
++test("no image, a failed one or a nonsense size gets the cards' old fixed shape", () => {
++  assert.equal(imageRatio(null), IMAGE_RATIO_FALLBACK);
++  assert.equal(imageRatio(undefined), IMAGE_RATIO_FALLBACK);
++  assert.equal(imageRatio({ width: 0, height: 300 }), IMAGE_RATIO_FALLBACK);
++  assert.equal(imageRatio({ width: NaN, height: 3 }), IMAGE_RATIO_FALLBACK);
++  assert.equal(IMAGE_RATIO_FALLBACK, 0.85);
++});
++
++test("cards show in order: a later image that loads first waits for the earlier ones", () => {
++  const done = new Set(["b", "c"]);
++  const items = ["a", "b", "c", "d"];
++  assert.equal(
++    settledPrefix(items, (i) => done.has(i)),
++    0,
++  );
++  done.add("a");
++  assert.equal(
++    settledPrefix(items, (i) => done.has(i)),
++    3,
++  );
++  done.add("d");
++  assert.equal(
++    settledPrefix(items, (i) => done.has(i)),
++    4,
++  );
++  assert.equal(
++    settledPrefix([], () => false),
++    0,
++  );
++});
++
++test("each URL is measured once, concurrent callers share it, and the result is kept", async () => {
++  const asked: string[] = [];
++  const sizes = createImageSizeCache({
++    measure: async (url) => {
++      asked.push(url);
++      return { width: 100, height: 150 };
++    },
++  });
++  assert.equal(sizes.peek("x"), undefined);
++  const [one, two] = await Promise.all([sizes.get("x"), sizes.get("x")]);
++  assert.deepEqual(one, { width: 100, height: 150 });
++  assert.equal(one, two);
++  assert.deepEqual(await sizes.get("x"), { width: 100, height: 150 });
++  assert.deepEqual(sizes.peek("x"), { width: 100, height: 150 });
++  assert.deepEqual(asked, ["x"]);
++});
++
++test("at most `concurrency` measurements run at once", async () => {
++  let running = 0;
++  let most = 0;
++  const sizes = createImageSizeCache({
++    concurrency: 2,
++    measure: async () => {
++      running++;
++      most = Math.max(most, running);
++      await later(5);
++      running--;
++      return { width: 1, height: 1 };
++    },
++  });
++  await Promise.all(["a", "b", "c", "d", "e"].map((u) => sizes.get(u)));
++  assert.equal(most, 2);
++});
++
++test("a failed or timed-out image settles as null, and a late size is kept for next time", async () => {
++  let release: (size: ImageSize) => void = () => {};
++  const sizes = createImageSizeCache({
++    timeoutMs: 10,
++    measure: (url) =>
++      url === "slow"
++        ? new Promise<ImageSize>((r) => (release = r))
++        : url === "throws"
++          ? (() => {
++              throw new Error("bad");
++            })()
++          : Promise.reject(new Error("404")),
++  });
++  assert.equal(await sizes.get("broken"), null);
++  assert.equal(await sizes.get("throws"), null);
++  assert.equal(await sizes.get("slow"), null);
++  assert.equal(sizes.peek("slow"), null);
++  release({ width: 100, height: 200 });
++  await later(0);
++  assert.deepEqual(sizes.peek("slow"), { width: 100, height: 200 });
++});
++
++test("a timed-out measurement frees its slot for the next image", async () => {
++  const sizes = createImageSizeCache({
++    concurrency: 1,
++    timeoutMs: 10,
++    measure: (url) =>
++      url === "hang"
++        ? new Promise<ImageSize>(() => {})
++        : Promise.resolve({ width: 2, height: 1 }),
++  });
++  const hang = sizes.get("hang");
++  assert.deepEqual(await sizes.get("next"), { width: 2, height: 1 });
++  assert.equal(await hang, null);
++});
